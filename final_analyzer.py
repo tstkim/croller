@@ -4,7 +4,7 @@
 import asyncio
 import traceback
 from playwright.async_api import async_playwright
-from site_config import *
+from config import *
 from login_manager import LoginManager
 import json
 import re
@@ -112,6 +112,7 @@ class FinalAnalyzer:
             
             # 기존 성공한 선택자들 사용
             self.selectors.update({
+                '상품리스트': '.goods-list li, .item-list li, [class*="item"], li[class*="goods"]',
                 '상품명': '.name',
                 '가격': '.org_price', 
                 '선택옵션': 'select:nth-of-type(2)',
@@ -127,20 +128,20 @@ class FinalAnalyzer:
             print(f"❌ 선택자 분석 실패: {e}")
     
     async def _extract_three_products(self, page, test_links):
-        """3개 상품 강제 추출"""
-        print(f"\n📊 3개 상품 강제 추출 시작...")
+        """설정된 개수만큼 상품 강제 추출"""
+        print(f"\n📊 {TEST_PRODUCTS}개 상품 강제 추출 시작...")
         
         successful_count = 0
         max_attempts = min(len(test_links), 10)
         
         for i in range(max_attempts):
-            if successful_count >= 3:
-                print(f"🎉 목표 달성! 3개 상품 추출 완료")
+            if successful_count >= TEST_PRODUCTS:
+                print(f"🎉 목표 달성! {TEST_PRODUCTS}개 상품 추출 완료")
                 break
                 
             link = test_links[i]
             print(f"\n{'='*50}")
-            print(f"📦 상품 {i+1} 처리 중... (성공: {successful_count}/3)")
+            print(f"📦 상품 {i+1} 처리 중... (성공: {successful_count}/{TEST_PRODUCTS})")
             print(f"🔗 {link}")
             
             try:
@@ -150,7 +151,7 @@ class FinalAnalyzer:
                     self.test_data.append(data)
                     successful_count += 1
                     
-                    print(f"✅ 상품 {i+1} 성공! ({successful_count}/3)")
+                    print(f"✅ 상품 {i+1} 성공! ({successful_count}/{TEST_PRODUCTS})")
                     print(f"   📝 상품명: {data.get('상품명', '')[:50]}...")
                     print(f"   💰 가격: {data.get('가격', 'N/A')}")
                     print(f"   ⚙️ 옵션: {len(data.get('선택옵션', []))}개")

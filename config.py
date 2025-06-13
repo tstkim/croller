@@ -29,6 +29,18 @@ login_credentials = {
     'password': 'q6160q6160q'
 }
 
+# 테스트할 상품 개수 (선택자 검증용)
+TEST_PRODUCTS = 3
+
+# final_analyzer.py에서 사용할 설정
+LOGIN_REQUIRED = use_login
+MAIN_URL = login_url if use_login else product_base_url
+GALLERY_URL = catalog_url_template.format(page=1)
+SAMPLE_PRODUCT_URL = product_base_url + "/goods/view?no=621"
+USERNAME = login_credentials['userid']
+PASSWORD = login_credentials['password']
+SITE_NAME = code
+
 # 작업 시작 시간 기록
 now = datetime.now()  # 현재 시간을 기록
 start_time = time.time()  # 작업 시작 시간을 기록

@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./venv/Scripts/python.exe main.py)"
+      "Bash(./venv/Scripts/python.exe main.py)",
+      "Bash(python3:*)",
+      "Bash(./venv/Scripts/python.exe cralling_best/final_analyzer.py)",
+      "Bash(./venv/Scripts/python.exe run_crawler.py)",
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }

@@ -52,10 +52,15 @@ class FinalAnalyzer:
             try:
                 # 로그인 (동일 page/context에서 진행)
                 if LOGIN_REQUIRED:
-                    await self.login_manager.auto_login(page, MAIN_URL, USERNAME, PASSWORD)
+                    login_selectors = await self.login_manager.auto_login(page, MAIN_URL, USERNAME, PASSWORD)
                     await asyncio.sleep(1)  # 세션 적용 대기
                     print("[로그] 로그인 후 쿠키:", await context.cookies())
                     await page.reload()  # 세션 강제 동기화
+                    # 로그인 selector 저장
+                    if login_selectors:
+                        self.selectors['로그인_아이디_선택자'] = login_selectors.get('id')
+                        self.selectors['로그인_비밀번호_선택자'] = login_selectors.get('pw')
+                        self.selectors['로그인_버튼_선택자'] = login_selectors.get('btn')
                 print(f"[로그] 로그인 후 현재 URL: {page.url}")
                 # 로그인 후 곧바로 갤러리 페이지로 이동
                 await page.goto(GALLERY_URL, wait_until="domcontentloaded", timeout=30000, referer=MAIN_URL)

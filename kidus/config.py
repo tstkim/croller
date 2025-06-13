@@ -12,21 +12,21 @@ import urllib.request
 import math
 
 # 기본 설정
-code = "kidus"  # 브랜드영문
-brandname = "키더스"  # 브랜드한글
+code = "dawoori"  # 브랜드영문
+brandname = "다우리"  # 브랜드한글
 category = "학교체육"  # 카테고리 구분
 price_increase_rate = 1  # 가격 인상률 (예: 10% 인상 1.1)
 start_page = 1  # 시작 페이지 번호
-end_page = 12 # 끝 페이지 번호
+end_page = 1 # 끝 페이지 번호
 minimum_price = 10000  # 최소 가격 설정
 use_login = False  # 로그인 사용 여부
 login_url = ''  # 로그인 페이지 URL (로그인 불필요)
-catalog_url_template = 'https://www.kidus.co.kr/product/list.html?cate_no=99&page={page}'  # 카탈로그 페이지 URL 템플릿
-product_base_url = 'https://www.kidus.co.kr'  # 제품 페이지 베이스 URL
-base_url2= 'https://www.kidus.co.kr/product/'  # (필요시만 사용) 2차 이동시 썸네일이나 상세페이지 주소를 위한 도메인
+catalog_url_template = 'https://dawoori-sports.kr/goods/catalog?page={page}&searchMode=catalog&category=c0019&per=20&filter_display=lattice&code=0019&auto=1&popup=&iframe='  # 카탈로그 페이지 URL 템플릿
+product_base_url = 'https://dawoori-sports.kr'  # 제품 페이지 베이스 URL
+base_url2= ''  # (필요시만 사용) 2차 이동시 썸네일이나 상세페이지 주소를 위한 도메인
 login_credentials = {
-    'userid': '',
-    'password': ''
+    'userid': 'flowing',
+    'password': 'q6160q6160q'
 }
 
 # 작업 시작 시간 기록

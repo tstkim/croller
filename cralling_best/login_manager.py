@@ -22,16 +22,18 @@ class LoginManager:
             
             if login_form:
                 print(f"로그인 폼 탐지 완료: {login_form}")
-                await self._smart_login(page, login_form, username, password)
+                selectors = await self._smart_login(page, login_form, username, password)
                 print("로그인 완료")
-                return True
+                return selectors
             else:
                 print("로그인 폼을 찾을 수 없습니다.")
-                return await self._fallback_login(page, username, password)
+                selectors = await self._fallback_login(page, username, password)
+                return selectors
             
         except Exception as e:
             print(f"자동 로그인 실패: {e}")
-            return await self._fallback_login(page, username, password)
+            selectors = await self._fallback_login(page, username, password)
+            return selectors
     
     
     async def _detect_login_form(self, page):
@@ -125,51 +127,43 @@ class LoginManager:
     async def _smart_login(self, page, login_form, username, password):
         """탐지된 로그인 폼으로 스마트 로그인"""
         if login_form['method'] == 'form_submit':
-            await self._form_submit_login(page, login_form, username, password)
+            return await self._form_submit_login(page, login_form, username, password)
         else:
-            await self._field_by_field_login(page, login_form, username, password)
+            return await self._field_by_field_login(page, login_form, username, password)
     
     async def _form_submit_login(self, page, login_form, username, password):
         """form submit 방식 로그인"""
         form_selector = login_form['form_selector']
-        
-        # form 내에서 필드 찾기
         username_field = await self._find_username_field_in_form(page, form_selector)
         password_field = await self._find_password_field_in_form(page, form_selector)
-        
+        btn_selector = await self._find_submit_button_in_form(page, form_selector)
         if username_field and password_field:
             await page.fill(username_field, username)
             await page.fill(password_field, password)
-            
-            # submit 버튼 찾기
-            submit_button = await self._find_submit_button_in_form(page, form_selector)
-            if submit_button:
-                await page.click(submit_button)
+            if btn_selector:
+                await page.click(btn_selector)
             else:
                 await page.keyboard.press("Enter")
-            
             await page.wait_for_load_state("networkidle")
+            return {"id": username_field, "pw": password_field, "btn": btn_selector}
+        return None
     
     async def _field_by_field_login(self, page, login_form, username, password):
         """개별 필드 방식 로그인"""
         container_selector = login_form['container_selector']
-        
-        # 컨테이너 내에서 필드 찾기
         username_field = await self._find_username_field_in_container(page, container_selector)
         password_field = await self._find_password_field_in_container(page, container_selector)
-        
+        btn_selector = await self._find_login_button_in_container(page, container_selector)
         if username_field and password_field:
             await page.fill(username_field, username)
             await page.fill(password_field, password)
-            
-            # 로그인 버튼 찾기
-            login_button = await self._find_login_button_in_container(page, container_selector)
-            if login_button:
-                await page.click(login_button)
+            if btn_selector:
+                await page.click(btn_selector)
             else:
                 await page.keyboard.press("Enter")
-            
             await page.wait_for_load_state("networkidle")
+            return {"id": username_field, "pw": password_field, "btn": btn_selector}
+        return None
     
     async def _find_username_field_in_form(self, page, form_selector):
         """form 내에서 사용자명 필드 찾기"""
@@ -269,70 +263,63 @@ class LoginManager:
     async def _try_basic_login(self, page, username, password):
         """기본 로그인 시도"""
         try:
-            # 아이디 입력
             id_selectors = [
                 "#id", "#username", "#user_id", "#login_id",
                 "input[name='id']", "input[name='username']", 
                 "input[type='text']", "input[placeholder*='아이디']"
             ]
-            
             username_filled = False
+            used_id_selector = None
             for selector in id_selectors:
                 try:
                     await page.fill(selector, username)
                     username_filled = True
+                    used_id_selector = selector
                     break
                 except:
                     continue
-            
-            # 비밀번호 입력
             pw_selectors = [
                 "#password", "#passwd", "#pw", 
                 "input[name='password']", "input[type='password']"
             ]
-            
             password_filled = False
+            used_pw_selector = None
             for selector in pw_selectors:
                 try:
                     await page.fill(selector, password)
                     password_filled = True
+                    used_pw_selector = selector
                     break
                 except:
                     continue
-            
             if not username_filled or not password_filled:
                 print("로그인 필드를 찾을 수 없습니다.")
                 print("수동으로 로그인 후 Enter를 눌러주세요...")
                 input()
-                return True
-            
-            # 로그인 버튼 클릭
+                return None
             login_selectors = [
                 "button[type='submit']", "input[type='submit']",
                 ".login-btn", ".btn-login", "#login-btn",
                 "button:has-text('로그인')", "input[value*='로그인']"
             ]
-            
             button_clicked = False
+            used_btn_selector = None
             for selector in login_selectors:
                 try:
                     await page.click(selector)
                     button_clicked = True
+                    used_btn_selector = selector
                     await page.wait_for_load_state("networkidle")
                     break
                 except:
                     continue
-            
             if not button_clicked:
-                # Enter 키로 시도
                 await page.keyboard.press("Enter")
                 await page.wait_for_load_state("networkidle")
-            
             print("기본 로그인 완료")
-            return True
-            
+            return {"id": used_id_selector, "pw": used_pw_selector, "btn": used_btn_selector}
         except Exception as e:
             print(f"기본 로그인 실패: {e}")
             print("수동으로 로그인 후 Enter를 눌러주세요...")
             input()
-            return True
+            return None

@@ -343,14 +343,14 @@ with sync_playwright() as p:
                             image = Image.new("RGB", (600, 600), "white")
                             gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
                             image.paste(gray_background, (0, 500))
-                            # S2B REGISTERED 배지 영역 (우측 상단)
-                            # 파란색 배경
-                            blue_background = Image.new("RGB", (90, 90), (0, 82, 204))  # S2B 파란색
-                            image.paste(blue_background, (510, 0))
+                            # S2B REGISTERED 배지 영역 (우측 상단) - 크게 조정
+                            # 파란색 배경 (더 크게)
+                            blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
+                            image.paste(blue_background, (480, 0))
                             
-                            # 빨간색 하단 부분
-                            red_badge = Image.new("RGB", (90, 30), (255, 61, 70))
-                            image.paste(red_badge, (510, 60))
+                            # 빨간색 하단 부분 (더 크게)
+                            red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
+                            image.paste(red_badge, (480, 80))
                             draw = ImageDraw.Draw(image)
                             font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
                             max_text_width = 520  # 600px - 좌우 40px 여백
@@ -389,13 +389,13 @@ with sync_playwright() as p:
                             # S2B REGISTERED 텍스트 추가
                             badge_font_path = "C:/Windows/Fonts/arialbd.ttf"  # Arial Bold 폰트 사용
                             try:
-                                s2b_font = ImageFont.truetype(badge_font_path, 28)  # S2B 폰트 크기
-                                registered_font = ImageFont.truetype(badge_font_path, 11)  # REGISTERED 폰트 크기
+                                s2b_font = ImageFont.truetype(badge_font_path, 50)  # S2B 폰트 크기 (더 크게)
+                                registered_font = ImageFont.truetype(badge_font_path, 16)  # REGISTERED 폰트 크기 (더 크게)
                             except:
                                 try:
                                     badge_font_path = "C:/Windows/Fonts/Arial.ttf"  # 일반 Arial로 대체
-                                    s2b_font = ImageFont.truetype(badge_font_path, 28)
-                                    registered_font = ImageFont.truetype(badge_font_path, 11)
+                                    s2b_font = ImageFont.truetype(badge_font_path, 50)
+                                    registered_font = ImageFont.truetype(badge_font_path, 16)
                                 except:
                                     s2b_font = ImageFont.load_default()
                                     registered_font = ImageFont.load_default()
@@ -408,8 +408,8 @@ with sync_playwright() as p:
                                 s2b_height = bbox[3] - bbox[1]
                             except AttributeError:
                                 s2b_width, s2b_height = draw.textsize(s2b_text, font=s2b_font)
-                            s2b_x = 510 + (90 - s2b_width) // 2
-                            s2b_y = 15
+                            s2b_x = 480 + (120 - s2b_width) // 2  # 크게 한 배지에 맞춰 조정
+                            s2b_y = 10  # 약간 위로
                             draw.text((s2b_x, s2b_y), s2b_text, font=s2b_font, fill="white")
                             
                             # REGISTERED 텍스트 그리기 (빨간색 배경 위에)
@@ -420,8 +420,8 @@ with sync_playwright() as p:
                                 reg_height = bbox[3] - bbox[1]
                             except AttributeError:
                                 reg_width, reg_height = draw.textsize(reg_text, font=registered_font)
-                            reg_x = 510 + (90 - reg_width) // 2
-                            reg_y = 68
+                            reg_x = 480 + (120 - reg_width) // 2  # 크게 한 배지에 맞춰 조정
+                            reg_y = 88  # 빨간색 배경 위에
                             draw.text((reg_x, reg_y), reg_text, font=registered_font, fill="white")
                             try:
                                 image.save(f'{thumbnail_path}/{image_counter}_cr.jpg')

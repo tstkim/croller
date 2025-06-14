@@ -123,9 +123,31 @@ with sync_playwright() as p:
                 soup = bs(page.content(), 'html.parser')
                 base_url = product_base_url
 
-                # 제품 리스트 선택자 적용
-                product_list_selector = selectors.get("상품리스트", "li.df-prl-item.xans-record-")
-                product_list = soup.select(product_list_selector)
+                # 제품 리스트 선택자 적용 (범용 선택자 사용)
+                product_list_selector = selectors.get("상품리스트", ".goods-list li, .item-list li, [class*='item'], li[class*='goods'], .product-list li, .catalog li")
+                print(f"[DEBUG] 사용할 상품리스트 선택자: {product_list_selector}")
+                
+                # 여러 선택자를 시도해서 상품 찾기
+                product_list = []
+                for selector in product_list_selector.split(', '):
+                    try:
+                        found_products = soup.select(selector.strip())
+                        if found_products:
+                            product_list.extend(found_products)
+                            print(f"[DEBUG] '{selector.strip()}' 선택자로 {len(found_products)}개 상품 발견")
+                    except:
+                        continue
+                
+                # 중복 제거
+                seen_elements = set()
+                unique_product_list = []
+                for product in product_list:
+                    element_id = id(product)
+                    if element_id not in seen_elements:
+                        seen_elements.add(element_id)
+                        unique_product_list.append(product)
+                
+                product_list = unique_product_list
                 
                 # 고유한 상품 링크만 추출하여 중복 제거
                 unique_products = {}
@@ -146,16 +168,6 @@ with sync_playwright() as p:
                     continue
 
                 for product_link_partial, product in unique_products.items():
-                    try:
-                        # 상품명 텍스트를 포함한 전체 텍스트 가져오기
-                        full_text = product.select_one(selectors["상품명"]).get_text(strip=True)
-                        product_name = full_text.split(":", 1)[-1].strip()
-                        print(f"[PRODUCT] {product_name[:50]}...")
-                    except AttributeError:
-                        product_name = "상품명을 찾을 수 없습니다."
-                        print("[WARNING] 상품명 추출 실패")
-                    # print(f"상품명: {product_name}")  # 주석 처리
-
                     # 상품 링크 처리 (이미 unique_products에서 추출됨)
                     product_link = product_link_partial
                     if not product_link.startswith('http'):
@@ -182,6 +194,40 @@ with sync_playwright() as p:
                         logging.error(f"상품 페이지 이동 중 오류 발생: {e}")
                         continue
 
+                    # 상품명 추출 (개별 상품 페이지에서)
+                    product_name = "상품명을 찾을 수 없습니다."
+                    try:
+                        # 여러 상품명 선택자 시도
+                        name_selectors = [
+                            selectors["상품명"], 
+                            ".name", 
+                            "h1", 
+                            "h2", 
+                            ".title", 
+                            ".product-name", 
+                            ".goods-name",
+                            ".item-name",
+                            "[itemprop='name']"
+                        ]
+                        
+                        for name_selector in name_selectors:
+                            try:
+                                name_element = product_soup.select_one(name_selector)
+                                if name_element:
+                                    full_text = name_element.get_text(strip=True)
+                                    if full_text and len(full_text) > 3:  # 의미있는 텍스트인지 확인
+                                        product_name = full_text.split(":", 1)[-1].strip()
+                                        print(f"[PRODUCT] {product_name[:50]}...")
+                                        break
+                            except:
+                                continue
+                        
+                        if product_name == "상품명을 찾을 수 없습니다.":
+                            print("[WARNING] 상품명 추출 실패")
+                    except Exception as e:
+                        logging.error(f"상품명 추출 중 오류 발생: {e}")
+                        product_name = "상품명을 찾을 수 없습니다."
+                    
                     # 가격
                     try:
                         # 여러 가격 선택자 시도

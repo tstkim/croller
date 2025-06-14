@@ -1,0 +1,71 @@
+{
+  "선택자": {
+    "로그인_아이디_선택자": "form[action='../login_process/login'] input[type='text']",
+    "로그인_비밀번호_선택자": "form[action='../login_process/login'] input[type='password']",
+    "로그인_버튼_선택자": "form[action='../login_process/login'] button[type='submit']",
+    "상품링크": "a[href*=\"/goods/view\"]",
+    "상품리스트": ".goods-list li, .item-list li, [class*=\"item\"], li[class*=\"goods\"], .product-list li, .catalog li",
+    "상품명": ".name",
+    "가격": ".org_price",
+    "선택옵션": "select:not([name*=\"quantity\"])",
+    "썸네일": ".viewImgWrap img",
+    "상세페이지": ".goods_description img"
+  },
+  "추출데이터": [
+    {
+      "url": "https://dawoori-sports.kr/goods/view?no=632",
+      "상품명": "노르딕 코멧 투창 400g, 500g, 600g, 700g, 800g/공인품/연습용/경기용/시합용/학생용/전문가용/공인품/노르딕투창",
+      "가격": "230,000원",
+      "선택옵션": [
+        "택배(주문 시 결제)",
+        "- 무게 선택 -",
+        "400g",
+        "500g(+39,000₩)",
+        "600g(+39,000₩)",
+        "700g(+39,000₩)",
+        "800g(+79,000₩)"
+      ],
+      "썸네일": "/data/goods/1/2023/12/632_2023122111352416.jpg",
+      "상세페이지": [
+        "/data/editor/goods/1/2023/12/632_2dd805fdbd0a0ee390fad0252dbd16ab1331302.jpg",
+        "/data/editor/goods/1/2022/05/595_b72e42f565133c8f4ecfb46bec973eaf2017123.jpg"
+      ]
+    },
+    {
+      "url": "https://dawoori-sports.kr/goods/view?no=648",
+      "상품명": "직선홉매트/훈련용매트/구르기매트/ 놀이매트",
+      "가격": "58,000원",
+      "선택옵션": [
+        "택배(주문 시 결제)"
+      ],
+      "썸네일": "/data/goods/1/2024/10/648_temp_17289699747150view.jpg",
+      "상세페이지": [
+        "/data/editor/goods/1/2015/02/152_c8f7360f46baebafdf0411d94c5440011613501.jpg",
+        "/data/editor/goods/1/2024/10/648_67e8a5f67d08159ea976de8bfe1081c71426352.jpg",
+        "/data/editor/goods/1/2024/10/648_b6d95283a1422724f1d92774af90bc461426522.jpg",
+        "/data/editor/goods/1/2024/10/648_0b09d156e715c64afabf1accb9ba05a21427042.jpg",
+        "/data/editor/goods/1/2024/10/648_426ca23039a10fcf2d8cca47bc9960021349072.jpg",
+        "/data/editor/goods/1/2022/05/595_b72e42f565133c8f4ecfb46bec973eaf2017123.jpg"
+      ]
+    },
+    {
+      "url": "https://dawoori-sports.kr/goods/view?no=631",
+      "상품명": "테크니화이버 티핏275 테니스라켓/275g/T-fit275",
+      "가격": "140,000원",
+      "선택옵션": [
+        "택배(주문 시 결제)"
+      ],
+      "썸네일": "/data/goods/1/2023/12/631_2023121216325811.jpg",
+      "상세페이지": [
+        "/data/editor/goods/1/2023/12/631_649934d0b32bc4648a170c42065d941b0928033.jpg",
+        "/data/editor/goods/1/2022/05/595_b72e42f565133c8f4ecfb46bec973eaf2017123.jpg"
+      ]
+    }
+  ],
+  "SmartDetector정보": {
+    "detected_stage": "4단계: 휴리스틱 DOM 탐색",
+    "detection_log": [],
+    "timestamp": "2025-06-14T18:46:37.114709"
+  },
+  "생성일시": "2025-06-14T18:46:37.114736"
+}

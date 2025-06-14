@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 통합 크롤링 실행기
-1단계: final_analyzer.py로 선택자 자동 분석
+1단계: final_analyzer_clean.py로 선택자 자동 분석
 2단계: main.py로 대량 크롤링 실행
 """
 
@@ -24,8 +24,8 @@ def run_final_analyzer():
     # 가상환경의 Python 실행 파일 경로
     python_exe = "./venv/Scripts/python.exe"
     
-    # 루트 디렉토리의 final_analyzer.py 실행
-    result = subprocess.run([python_exe, "final_analyzer.py"])
+    # 루트 디렉토리의 final_analyzer_clean.py 실행
+    result = subprocess.run([python_exe, "final_analyzer_clean.py"])
     
     # 실행 후 새로운 JSON 파일이 생성되었는지 확인
     after_files = glob.glob("perfect_result_*.json")

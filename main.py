@@ -343,7 +343,11 @@ with sync_playwright() as p:
                             image = Image.new("RGB", (600, 600), "white")
                             gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
                             image.paste(gray_background, (0, 500))
-                            # S2B REGISTERED 배지 영역 (우측 상단) - 크게 조정
+                            
+                            # 먼저 상품 이미지를 붙임
+                            image.paste(im, (100, 100))
+                            
+                            # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
                             # 파란색 배경 (더 크게)
                             blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
                             image.paste(blue_background, (480, 0))
@@ -384,7 +388,6 @@ with sync_playwright() as p:
                                 print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
                             except Exception as e:
                                 print(f"[ERROR] draw.text 오류: {e}")
-                            image.paste(im, (100, 100))
                             
                             # S2B REGISTERED 텍스트 추가
                             badge_font_path = "C:/Windows/Fonts/arialbd.ttf"  # Arial Bold 폰트 사용
@@ -424,7 +427,7 @@ with sync_playwright() as p:
                             reg_y = 88  # 빨간색 배경 위에
                             draw.text((reg_x, reg_y), reg_text, font=registered_font, fill="white")
                             try:
-                                image.save(f'{thumbnail_path}/{image_counter}_cr.jpg')
+                                image.save(f'{thumbnail_path}/{image_counter}_cr.jpg', quality=95, optimize=False)
                                 print(f"[DEBUG] 썸네일 저장 성공: {thumbnail_path}/{image_counter}_cr.jpg")
                             except Exception as e:
                                 print(f"[ERROR] 썸네일 저장 오류: {e}")

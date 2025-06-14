@@ -1,7 +1,7 @@
 """
 4단계 지능형 선택자 자동 탐지 시스템 - 완전 구현
 1단계: API/XHR 스니핑 (최우선) ✅
-2단계: JSON-LD 파싱 (백업 1) 
+2단계: JSON-LD 파싱 (백업 1) ✅
 3단계: 메타태그 추출 (백업 2) ✅  
 4단계: 휴리스틱 DOM 탐색 (최종 백업) ✅
 """
@@ -207,8 +207,139 @@ class SmartDetector:
                     self._search_json_recursive(item, found_data, depth + 1)
     
     async def _stage2_jsonld_parsing(self, page):
-        """2단계: JSON-LD 파싱 - 구현 예정"""
-        # 다음 작업에서 구현될 예정
+        """
+        2단계: JSON-LD 파싱
+        페이지의 JSON-LD 구조화 데이터에서 상품 정보를 추출
+        """
+        print("   🔗 JSON-LD 구조화 데이터 탐지 시작...")
+        
+        # JSON-LD 스크립트 태그들 찾기
+        jsonld_scripts = await page.query_selector_all('script[type="application/ld+json"]')
+        
+        if not jsonld_scripts:
+            print("   ❌ JSON-LD 스크립트를 찾지 못함")
+            return None
+        
+        print(f"   📊 {len(jsonld_scripts)}개 JSON-LD 스크립트 발견")
+        
+        # 각 JSON-LD 스크립트 분석
+        for i, script in enumerate(jsonld_scripts):
+            try:
+                # JSON-LD 내용 추출
+                json_content = await script.inner_text()
+                if not json_content.strip():
+                    continue
+                
+                print(f"   🔍 JSON-LD {i+1} 분석 중...")
+                
+                # JSON 파싱
+                json_data = json.loads(json_content)
+                
+                # 상품 정보 추출
+                selectors = self._extract_from_jsonld(json_data)
+                
+                if selectors:
+                    print(f"   ✅ JSON-LD에서 선택자 추출 성공!")
+                    return selectors
+                    
+            except json.JSONDecodeError as e:
+                print(f"   ⚠️ JSON-LD {i+1} 파싱 오류: {e}")
+                continue
+            except Exception as e:
+                print(f"   ⚠️ JSON-LD {i+1} 처리 오류: {e}")
+                continue
+        
+        print("   ❌ JSON-LD에서 유효한 선택자를 찾지 못함")
+        return None
+    
+    def _extract_from_jsonld(self, json_data):
+        """
+        JSON-LD 데이터에서 상품 정보를 추출하여 선택자로 변환
+        Schema.org Product, Offer 등의 구조화 데이터 지원
+        """
+        if not json_data:
+            return None
+        
+        selectors = {}
+        
+        # JSON-LD 데이터를 리스트로 변환 (단일 객체일 수도 있음)
+        items = json_data if isinstance(json_data, list) else [json_data]
+        
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+                
+            # @type으로 스키마 타입 확인
+            schema_type = item.get('@type', '')
+            
+            # Product 스키마 처리
+            if 'Product' in schema_type:
+                print(f"   📦 Product 스키마 발견: {schema_type}")
+                
+                # 상품명 추출
+                if 'name' in item and item['name']:
+                    selectors['상품명'] = 'h1, .product-title, .product-name, [itemprop="name"]'
+                    print(f"   ✅ 상품명 발견: {item['name'][:50]}...")
+                
+                # 상품 이미지 추출
+                if 'image' in item:
+                    image_data = item['image']
+                    if image_data:
+                        selectors['썸네일'] = '.product-image img, .main-image img, [itemprop="image"]'
+                        print(f"   ✅ 상품 이미지 발견")
+                
+                # 설명 추출
+                if 'description' in item and item['description']:
+                    selectors['상세설명'] = '.product-description, .description, [itemprop="description"]'
+                    print(f"   ✅ 상품 설명 발견")
+                
+                # Offer 정보 처리
+                offers = item.get('offers', [])
+                if not isinstance(offers, list):
+                    offers = [offers]
+                
+                for offer in offers:
+                    if isinstance(offer, dict):
+                        # 가격 정보
+                        if 'price' in offer and offer['price']:
+                            selectors['가격'] = '.price, .product-price, [itemprop="price"]'
+                            print(f"   ✅ 가격 발견: {offer['price']}")
+                        
+                        # 통화 정보
+                        if 'priceCurrency' in offer:
+                            print(f"   💱 통화: {offer['priceCurrency']}")
+                        
+                        # 상품 가용성
+                        if 'availability' in offer:
+                            availability = offer['availability']
+                            if 'InStock' in str(availability):
+                                selectors['재고상태'] = '.stock-status, .availability, [itemprop="availability"]'
+                                print(f"   ✅ 재고 상태 발견")
+            
+            # Organization/WebSite 스키마 처리 (배경 정보)
+            elif schema_type in ['Organization', 'WebSite']:
+                print(f"   🏢 {schema_type} 스키마 발견 (배경 정보)")
+                continue
+            
+            # BreadcrumbList 스키마 처리
+            elif 'BreadcrumbList' in schema_type:
+                print(f"   🍞 브레드크럼 스키마 발견")
+                selectors['브레드크럼'] = '.breadcrumb, .breadcrumbs, [itemtype*="BreadcrumbList"]'
+            
+            # 기타 스키마 타입들 처리
+            else:
+                # 다른 스키마에서도 상품 정보 찾기
+                if 'name' in item and item['name']:
+                    if not selectors.get('상품명'):
+                        selectors['상품명'] = 'h1, .title, .name'
+                        print(f"   ✅ 일반 스키마에서 제목 발견: {item['name'][:50]}...")
+        
+        # 최소 2개 이상의 선택자가 있어야 성공으로 간주
+        if len(selectors) >= 2:
+            print(f"   ✅ JSON-LD에서 {len(selectors)}개 선택자 추출: {list(selectors.keys())}")
+            return selectors
+        
+        print(f"   ⚠️ JSON-LD에서 충분한 선택자를 찾지 못함 ({len(selectors)}개)")
         return None
     
     async def _stage3_meta_extraction(self, page):
@@ -334,7 +465,7 @@ class SmartDetector:
 if __name__ == "__main__":
     print("🎯 SmartDetector 4단계 완전 구현")
     print("✅ 1단계: API/XHR 스니핑")
-    print("⏳ 2단계: JSON-LD 파싱 (구현 예정)")
+    print("✅ 2단계: JSON-LD 파싱")
     print("✅ 3단계: 메타태그 추출") 
     print("✅ 4단계: 휴리스틱 DOM 탐색")
     print("이 모듈은 final_analyzer.py에서 import하여 사용됩니다.")

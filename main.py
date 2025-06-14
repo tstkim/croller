@@ -392,12 +392,12 @@ with sync_playwright() as p:
                             # S2B REGISTERED 텍스트 추가
                             badge_font_path = "C:/Windows/Fonts/arialbd.ttf"  # Arial Bold 폰트 사용
                             try:
-                                s2b_font = ImageFont.truetype(badge_font_path, 50)  # S2B 폰트 크기 (더 크게)
+                                s2b_font = ImageFont.truetype(badge_font_path, 60)  # S2B 폰트 크기 (더 크게 해서 공백 줄이기)
                                 registered_font = ImageFont.truetype(badge_font_path, 16)  # REGISTERED 폰트 크기 (더 크게)
                             except:
                                 try:
                                     badge_font_path = "C:/Windows/Fonts/Arial.ttf"  # 일반 Arial로 대체
-                                    s2b_font = ImageFont.truetype(badge_font_path, 50)
+                                    s2b_font = ImageFont.truetype(badge_font_path, 60)
                                     registered_font = ImageFont.truetype(badge_font_path, 16)
                                 except:
                                     s2b_font = ImageFont.load_default()
@@ -412,7 +412,7 @@ with sync_playwright() as p:
                             except AttributeError:
                                 s2b_width, s2b_height = draw.textsize(s2b_text, font=s2b_font)
                             s2b_x = 480 + (120 - s2b_width) // 2  # 크게 한 배지에 맞춰 조정
-                            s2b_y = 10  # 약간 위로
+                            s2b_y = 5  # 더 위로 올려서 공백 줄이기
                             draw.text((s2b_x, s2b_y), s2b_text, font=s2b_font, fill="white")
                             
                             # REGISTERED 텍스트 그리기 (빨간색 배경 위에)

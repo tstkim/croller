@@ -7,37 +7,16 @@
     "상품리스트": ".goods-list li, .item-list li, [class*=\"item\"], li[class*=\"goods\"], .product-list li, .catalog li",
     "상품명": ".name",
     "가격": ".org_price",
-    "선택옵션": "select:not([name*=\"quantity\"])",
+    "선택옵션": "select:nth-of-type(2), select[name*=\"option\"], .option select",
     "썸네일": ".viewImgWrap img",
     "상세페이지": ".goods_description img"
   },
   "추출데이터": [
     {
-      "url": "https://dawoori-sports.kr/goods/view?no=632",
-      "상품명": "노르딕 코멧 투창 400g, 500g, 600g, 700g, 800g/공인품/연습용/경기용/시합용/학생용/전문가용/공인품/노르딕투창",
-      "가격": "230,000원",
-      "선택옵션": [
-        "택배(주문 시 결제)",
-        "- 무게 선택 -",
-        "400g",
-        "500g(+39,000₩)",
-        "600g(+39,000₩)",
-        "700g(+39,000₩)",
-        "800g(+79,000₩)"
-      ],
-      "썸네일": "/data/goods/1/2023/12/632_2023122111352416.jpg",
-      "상세페이지": [
-        "/data/editor/goods/1/2023/12/632_2dd805fdbd0a0ee390fad0252dbd16ab1331302.jpg",
-        "/data/editor/goods/1/2022/05/595_b72e42f565133c8f4ecfb46bec973eaf2017123.jpg"
-      ]
-    },
-    {
       "url": "https://dawoori-sports.kr/goods/view?no=648",
       "상품명": "직선홉매트/훈련용매트/구르기매트/ 놀이매트",
       "가격": "58,000원",
-      "선택옵션": [
-        "택배(주문 시 결제)"
-      ],
+      "선택옵션": [],
       "썸네일": "/data/goods/1/2024/10/648_temp_17289699747150view.jpg",
       "상세페이지": [
         "/data/editor/goods/1/2015/02/152_c8f7360f46baebafdf0411d94c5440011613501.jpg",
@@ -49,15 +28,30 @@
       ]
     },
     {
-      "url": "https://dawoori-sports.kr/goods/view?no=631",
-      "상품명": "테크니화이버 티핏275 테니스라켓/275g/T-fit275",
-      "가격": "140,000원",
-      "선택옵션": [
-        "택배(주문 시 결제)"
-      ],
-      "썸네일": "/data/goods/1/2023/12/631_2023121216325811.jpg",
+      "url": "https://dawoori-sports.kr/goods/view?no=643",
+      "상품명": "주장완장 벨크로 C-02/캡틴밴드/주장밴드/부드럽고 신축성 있는 소재/29cmX8cm/축구용품/학교용품/체육용품",
+      "가격": "2,500원",
+      "선택옵션": [],
+      "썸네일": "/data/goods/1/2024/10/643_temp_17285241837486view.jpg",
       "상세페이지": [
-        "/data/editor/goods/1/2023/12/631_649934d0b32bc4648a170c42065d941b0928033.jpg",
+        "/data/editor/goods/1/2024/10/643_f121d135f39f03e48da5fe5e8ced5b0a1037574.jpg",
+        "/data/editor/goods/1/2024/10/643_bc01f32ce0b870d4d4818131fcb70b361037364.jpg",
+        "/data/editor/goods/1/2024/10/643_a1c3eb6b453541ef74250de45cdee29d1037024.jpg",
+        "/data/editor/goods/1/2024/10/643_62daf73c2f54255c5130c31c4b1d547b1037024.jpg",
+        "/data/editor/goods/1/2024/10/643_2e6c1179d1783f4c1026be00ca2608e61037034.jpg",
+        "/data/editor/goods/1/2024/10/643_dda68931606400e2e13ece35682e67a81037034.jpg",
+        "/data/editor/goods/1/2024/10/643_a69be489e35c82d42f4d46d48934809a1515151.jpg",
+        "/data/editor/goods/1/2022/05/595_b72e42f565133c8f4ecfb46bec973eaf2017123.jpg"
+      ]
+    },
+    {
+      "url": "https://dawoori-sports.kr/goods/view?no=665",
+      "상품명": "공보관함/110cmX80cmX80cm/고강도강철소재/코팅처리/잠금장치/조립식",
+      "가격": "400,000원",
+      "선택옵션": [],
+      "썸네일": "/data/goods/1/2025/03/665_2025032510114319.jpg",
+      "상세페이지": [
+        "/data/editor/goods/1/2015/01/111_5eb2143cb83d9f4d31b449b7a00695ce1449275.jpg",
         "/data/editor/goods/1/2022/05/595_b72e42f565133c8f4ecfb46bec973eaf2017123.jpg"
       ]
     }
@@ -65,7 +59,7 @@
   "SmartDetector정보": {
     "detected_stage": "4단계: 휴리스틱 DOM 탐색",
     "detection_log": [],
-    "timestamp": "2025-06-14T18:46:37.114709"
+    "timestamp": "2025-06-15T05:00:45.193931"
   },
-  "생성일시": "2025-06-14T18:46:37.114736"
+  "생성일시": "2025-06-15T05:00:45.193942"
 }

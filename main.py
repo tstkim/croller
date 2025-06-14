@@ -10,6 +10,37 @@ import glob
 import os
 import json
 
+def is_valid_option(text):
+    """유효한 선택옵션인지 판단"""
+    if not text:
+        return False
+    
+    text_lower = text.lower().strip()
+    
+    # 완전히 제외할 패턴들 (정확히 일치하는 경우만)
+    exact_exclude = [
+        '선택', '-- 선택 --', '옵션선택', '옵션을 선택해주세요',
+        '- 무게 선택 -', '- 색상 선택 -', '- 사이즈 선택 -',
+        '- 종류 선택 -', '- 크기 선택 -'
+    ]
+    
+    # 포함된 경우 제외할 패턴들
+    partial_exclude = [
+        '택배(주문 시 결제)', '배송비', '주문 시 결제', '택배'
+    ]
+    
+    # 정확히 일치하는 제외 패턴 확인
+    for pattern in exact_exclude:
+        if text.strip() == pattern or text_lower == pattern.lower():
+            return False
+    
+    # 부분 일치하는 제외 패턴 확인
+    for pattern in partial_exclude:
+        if pattern.lower() in text_lower:
+            return False
+    
+    return True
+
 # 로그 설정
 logging.basicConfig(filename='app.log', level=logging.INFO)
 
@@ -38,6 +69,24 @@ def is_valid_detail_image(url):
             return True
     
     return False
+
+def get_fitting_font(draw, text, max_width, font_path, max_font_size=65, min_font_size=30):
+    """상품명 길이에 따라 글자 크기를 동적으로 조정 (최소 30pt)"""
+    font_size = max_font_size
+    while font_size >= min_font_size:
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+            try:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+            except AttributeError:
+                text_width, _ = draw.textsize(text, font=font)
+            if text_width <= max_width:
+                return font
+        except Exception as e:
+            print(f"[ERROR] 폰트 사이즈 {font_size}에서 오류: {e}")
+        font_size -= 2
+    return ImageFont.truetype(font_path, min_font_size)
 
 # Playwright를 사용한 웹드라이버 설정 및 시작
 with sync_playwright() as p:
@@ -168,6 +217,7 @@ with sync_playwright() as p:
                     continue
 
                 for product_link_partial, product in unique_products.items():
+                    print(f"[DEBUG] 상품 처리 시작: {product_link_partial}")
                     # 상품 링크 처리 (이미 unique_products에서 추출됨)
                     product_link = product_link_partial
                     if not product_link.startswith('http'):
@@ -182,16 +232,15 @@ with sync_playwright() as p:
                     try:
                         page.goto(product_link)
                         page.wait_for_timeout(2000)
-                        
                         # 상품페이지에서 스크롤을 아래로 내려서 상세페이지 이미지 로드
                         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         page.wait_for_timeout(1000)
                         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         page.wait_for_timeout(2000)
-                        
                         product_soup = bs(page.content(), 'html.parser')
                     except Exception as e:
                         logging.error(f"상품 페이지 이동 중 오류 발생: {e}")
+                        print(f"[ERROR] 상품 페이지 이동 중 오류: {e}")
                         continue
 
                     # 상품명 추출 (개별 상품 페이지에서)
@@ -199,17 +248,9 @@ with sync_playwright() as p:
                     try:
                         # 여러 상품명 선택자 시도
                         name_selectors = [
-                            selectors["상품명"], 
-                            ".name", 
-                            "h1", 
-                            "h2", 
-                            ".title", 
-                            ".product-name", 
-                            ".goods-name",
-                            ".item-name",
-                            "[itemprop='name']"
+                            selectors["상품명"], ".name", "h1", "h2", ".title", ".product-name", ".goods-name",
+                            ".item-name", "[itemprop='name']"
                         ]
-                        
                         for name_selector in name_selectors:
                             try:
                                 name_element = product_soup.select_one(name_selector)
@@ -219,55 +260,42 @@ with sync_playwright() as p:
                                         product_name = full_text.split(":", 1)[-1].strip()
                                         print(f"[PRODUCT] {product_name[:50]}...")
                                         break
-                            except:
+                            except Exception as e:
+                                print(f"[ERROR] 상품명 선택자 오류: {e}")
                                 continue
-                        
                         if product_name == "상품명을 찾을 수 없습니다.":
                             print("[WARNING] 상품명 추출 실패")
                     except Exception as e:
                         logging.error(f"상품명 추출 중 오류 발생: {e}")
+                        print(f"[ERROR] 상품명 추출 중 오류: {e}")
                         product_name = "상품명을 찾을 수 없습니다."
-                    
+
                     # 가격
                     try:
-                        # 여러 가격 선택자 시도
                         price_selectors = [
-                            selectors["가격"],
-                            ".price", 
-                            ".org_price",
-                            ".sale_price",
-                            "[class*='price']",
-                            ".cost",
-                            ".amount"
+                            selectors["가격"], ".price", ".org_price", ".sale_price", "[class*='price']", ".cost", ".amount"
                         ]
-                        
                         price_element = None
                         for price_sel in price_selectors:
                             price_element = product_soup.select_one(price_sel)
                             if price_element:
                                 print(f"[DEBUG] 가격 선택자 '{price_sel}' 성공")
                                 break
-                        
                         if price_element:
                             price = price_element.get_text(strip=True)
-                            # 인코딩 문제 방지를 위해 가격 출력을 간소화
                             price_display = price.encode('ascii', 'ignore').decode('ascii')
                             print(f"[DEBUG] 추출된 가격 텍스트: {price_display}")
-                            
-                            # 가격에서 숫자만 추출 (정규식 사용) - "원" 제거 확실히
                             import re
-                            # 원, 콤마, 기타 특수문자 모두 제거하고 숫자만 추출
                             clean_price = re.sub(r'[^\d]', '', price)
-                            if clean_price and len(clean_price) >= 3:  # 최소 3자리 숫자
+                            if clean_price and len(clean_price) >= 3:
                                 original_price = float(clean_price)
                                 adjusted_price = math.ceil((original_price * price_increase_rate) / 100) * 100
                                 if adjusted_price < minimum_price:
                                     adjusted_price = "가격 정보 없음"
                                 else:
-                                    # 최종 가격은 숫자만 (원 없이)
                                     adjusted_price = int(adjusted_price)
-                                logging.info(f"가격 추출 성공: {adjusted_price}")
-                                print(f"[DEBUG] 가격 추출 성공: {adjusted_price}")
+                                    logging.info(f"가격 추출 성공: {adjusted_price}")
+                                    print(f"[DEBUG] 가격 추출 성공: {adjusted_price}")
                             else:
                                 adjusted_price = "가격 정보 없음"
                                 print(f"[DEBUG] 유효한 가격을 찾을 수 없음: {price_display}")
@@ -279,24 +307,18 @@ with sync_playwright() as p:
                         logging.error("가격 추출 실패")
                         print(f"[DEBUG] 가격 추출 실패: {e}")
 
-                    #print(price)
-
-                    # 썸네일 이미지 주소 추출
+                    # 썸네일 이미지 주소 추출 및 저장
                     try:
                         thumbnail_element = product_soup.select_one(selectors["썸네일"])
                         if thumbnail_element:
-                            # 다양한 속성에서 이미지 URL 찾기
                             thumbnail_url = thumbnail_element.get("data-original") or thumbnail_element.get("data-src") or thumbnail_element.get("src")
-                            
                             if thumbnail_url:
-                                # 절대 URL로 변환
                                 if thumbnail_url.startswith('//'):
                                     thumbnail_url = 'https:' + thumbnail_url
                                 elif thumbnail_url.startswith('/'):
                                     thumbnail_url = product_base_url + thumbnail_url
                                 elif not thumbnail_url.startswith('http'):
                                     thumbnail_url = product_base_url + '/' + thumbnail_url
-                                    
                                 logging.info(f"썸네일 추출 성공: {thumbnail_url}")
                                 print(f"[DEBUG] 썸네일 추출 성공: {thumbnail_url}")
                             else:
@@ -310,46 +332,65 @@ with sync_playwright() as p:
                         logging.error(f"썸네일 이미지 주소 추출 중 오류 발생: {e}")
                         thumbnail_url = None
                         print(f"[DEBUG] 썸네일 추출 실패: {e}")
-                    # print(thumbnail_url)
+
                     # 썸네일 이미지 저장 및 새로운 캔버스에 편집
                     try:
                         if thumbnail_url:
+                            print(f"[DEBUG] 썸네일 이미지 다운로드 시도: {thumbnail_url}")
                             urllib.request.urlretrieve(thumbnail_url, f'{thumbnail_path}/{image_counter}_cr.jpg')
                             im = Image.open(f'{thumbnail_path}/{image_counter}_cr.jpg')
                             im = im.resize((400, 400))
-
-                            # 새로운 캔버스 생성
                             image = Image.new("RGB", (600, 600), "white")
-                            gray_background = Image.new("RGB", (600, 100), (56, 56, 56))  # 아래 검정색 바탕띠
+                            gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
                             image.paste(gray_background, (0, 500))
-
-                            red_background = Image.new("RGB", (150, 150), (255, 61, 70))  # 위 빨간색 바탕띠
+                            red_background = Image.new("RGB", (150, 150), (255, 61, 70))
                             image.paste(red_background, (440, 0))
-
-                            name_font = ImageFont.truetype("C:/Windows/Fonts/NanumGothicExtraBold.ttf", 65)
-                            label_font = ImageFont.truetype("C:/Windows/Fonts/NanumGothicExtraBold.ttf", 40)
-
-                            # 상품명 길이 제한: 10자 초과 시 생략
-                            max_length = 10
+                            draw = ImageDraw.Draw(image)
+                            font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
+                            max_text_width = 520  # 600px - 좌우 40px 여백
+                            max_font_size = 150
+                            min_font_size = 30
+                            max_length = 13
                             if len(product_name) > max_length:
                                 text1 = product_name[:max_length] + "..."
                             else:
                                 text1 = product_name
-
-                            # 파일명에 "-" 혹은 특수문자가 있으면 오류가 나므로 제거
                             text1 = text1.replace("-", "")
-                            ImageDraw.Draw(image).text((10, 510), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
-
-                            
-                            ImageDraw.Draw(image).text((460, 10), "S2B", font=name_font, fill="white", stroke_fill="red", stroke_width=2)
-                            ImageDraw.Draw(image).text((505, 95), "공식", font=label_font, fill="white", stroke_fill="red", stroke_width=1)
+                            try:
+                                name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
+                                # 텍스트 폭/높이 계산 및 중앙 정렬
+                                try:
+                                    bbox = draw.textbbox((0, 0), text1, font=name_font)
+                                    text_width = bbox[2] - bbox[0]
+                                    text_height = bbox[3] - bbox[1]
+                                except AttributeError:
+                                    text_width, text_height = draw.textsize(text1, font=name_font)
+                                x = (600 - text_width) // 2
+                                y = 500 + (100 - text_height) // 2
+                                print(f"[DEBUG] 폰트 적용 성공: {name_font.size}pt, 텍스트폭: {text_width}, x좌표: {x}")
+                            except Exception as e:
+                                print(f"[ERROR] 폰트 적용 오류: {e}")
+                                name_font = ImageFont.truetype(font_path, min_font_size)
+                                x = 10
+                                y = 510
+                            try:
+                                draw.text((x, y), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
+                                print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
+                            except Exception as e:
+                                print(f"[ERROR] draw.text 오류: {e}")
                             image.paste(im, (100, 100))
-
-                            image.save(f'{thumbnail_path}/{image_counter}_cr.jpg')
+                            try:
+                                image.save(f'{thumbnail_path}/{image_counter}_cr.jpg')
+                                print(f"[DEBUG] 썸네일 저장 성공: {thumbnail_path}/{image_counter}_cr.jpg")
+                            except Exception as e:
+                                print(f"[ERROR] 썸네일 저장 오류: {e}")
                             image.close()
-                    except (ValueError, urllib.error.HTTPError, urllib.error.URLError, FileNotFoundError) as e:
-                        logging.error(f"썸네일 이미지 처리 중 오류 발생: {e}")
+                        else:
+                            print("[WARNING] 썸네일 URL이 없어 이미지 생성 생략")
+                    except Exception as e:
+                        print(f"[ERROR] 썸네일 이미지 처리 중 오류: {e}")
                         continue
+                    print(f"[DEBUG] 상품 처리 종료: {product_link_partial}")
 
                     # 상세 페이지 이미지 저장 및 자르기
                     try:
@@ -421,7 +462,10 @@ with sync_playwright() as p:
 
                         for option_tag in option_tags:
                             option_value = option_tag.get_text(strip=True)
-                            if option_value and '필수' not in option_value and '---' not in option_value:
+                            # 유효한 옵션인지 확인
+                            if option_value and is_valid_option(option_value):
+                                # 화폐 기호 제거
+                                option_value = option_value.replace('₩', '').strip()
                                 option_name = option_value.split('(')[0].strip()
                                 price_change = "0"
                                 

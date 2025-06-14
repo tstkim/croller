@@ -255,8 +255,12 @@ class FinalAnalyzer:
                     option_list = []
                     for option in options:
                         text = (await option.text_content()).strip()
-                        if text and text not in ['선택', '-- 선택 --', '옵션선택', '옵션을 선택해주세요']:
-                            option_list.append(text)
+                        if text:
+                            # 먼저 화폐 기호 제거
+                            cleaned_text = text.replace('₩', '').replace('원', '').strip()
+                            # 그 다음 유효성 검사
+                            if self._is_valid_option(text):
+                                option_list.append(cleaned_text)
                     data['선택옵션'] = option_list
                 except:
                     data['선택옵션'] = []
@@ -304,6 +308,36 @@ class FinalAnalyzer:
         except Exception as e:
             print(f"[ERROR] 상품 추출 실패: {e}")
             return None
+    
+    def _is_valid_option(self, text):
+        """유효한 선택옵션인지 판단"""
+        if not text:
+            return False
+        
+        text_lower = text.lower().strip()
+        
+        # 완전히 제외할 패턴들 (정확히 일치하는 경우만)
+        exact_exclude = [
+            '선택', '-- 선택 --', '옵션선택', '옵션을 선택해주세요',
+            '- 무게 선택 -', '- 색상 선택 -', '- 사이즈 선택 -'
+        ]
+        
+        # 포함된 경우 제외할 패턴들
+        partial_exclude = [
+            '택배(주문 시 결제)', '배송비', '주문 시 결제'
+        ]
+        
+        # 정확히 일치하는 제외 패턴 확인
+        for pattern in exact_exclude:
+            if text.strip() == pattern or text_lower == pattern.lower():
+                return False
+        
+        # 부분 일치하는 제외 패턴 확인
+        for pattern in partial_exclude:
+            if pattern.lower() in text_lower:
+                return False
+        
+        return True
     
     def _is_valid_detail_image(self, url):
         """유효한 상세 이미지인지 판단"""

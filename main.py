@@ -343,8 +343,14 @@ with sync_playwright() as p:
                             image = Image.new("RGB", (600, 600), "white")
                             gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
                             image.paste(gray_background, (0, 500))
-                            red_background = Image.new("RGB", (150, 150), (255, 61, 70))
-                            image.paste(red_background, (440, 0))
+                            # S2B REGISTERED 배지 영역 (우측 상단)
+                            # 파란색 배경
+                            blue_background = Image.new("RGB", (90, 90), (0, 82, 204))  # S2B 파란색
+                            image.paste(blue_background, (510, 0))
+                            
+                            # 빨간색 하단 부분
+                            red_badge = Image.new("RGB", (90, 30), (255, 61, 70))
+                            image.paste(red_badge, (510, 60))
                             draw = ImageDraw.Draw(image)
                             font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
                             max_text_width = 520  # 600px - 좌우 40px 여백
@@ -379,6 +385,44 @@ with sync_playwright() as p:
                             except Exception as e:
                                 print(f"[ERROR] draw.text 오류: {e}")
                             image.paste(im, (100, 100))
+                            
+                            # S2B REGISTERED 텍스트 추가
+                            badge_font_path = "C:/Windows/Fonts/arialbd.ttf"  # Arial Bold 폰트 사용
+                            try:
+                                s2b_font = ImageFont.truetype(badge_font_path, 28)  # S2B 폰트 크기
+                                registered_font = ImageFont.truetype(badge_font_path, 11)  # REGISTERED 폰트 크기
+                            except:
+                                try:
+                                    badge_font_path = "C:/Windows/Fonts/Arial.ttf"  # 일반 Arial로 대체
+                                    s2b_font = ImageFont.truetype(badge_font_path, 28)
+                                    registered_font = ImageFont.truetype(badge_font_path, 11)
+                                except:
+                                    s2b_font = ImageFont.load_default()
+                                    registered_font = ImageFont.load_default()
+                            
+                            # S2B 텍스트 그리기 (파란색 배경 위에)
+                            s2b_text = "S2B"
+                            try:
+                                bbox = draw.textbbox((0, 0), s2b_text, font=s2b_font)
+                                s2b_width = bbox[2] - bbox[0]
+                                s2b_height = bbox[3] - bbox[1]
+                            except AttributeError:
+                                s2b_width, s2b_height = draw.textsize(s2b_text, font=s2b_font)
+                            s2b_x = 510 + (90 - s2b_width) // 2
+                            s2b_y = 15
+                            draw.text((s2b_x, s2b_y), s2b_text, font=s2b_font, fill="white")
+                            
+                            # REGISTERED 텍스트 그리기 (빨간색 배경 위에)
+                            reg_text = "REGISTERED"
+                            try:
+                                bbox = draw.textbbox((0, 0), reg_text, font=registered_font)
+                                reg_width = bbox[2] - bbox[0]
+                                reg_height = bbox[3] - bbox[1]
+                            except AttributeError:
+                                reg_width, reg_height = draw.textsize(reg_text, font=registered_font)
+                            reg_x = 510 + (90 - reg_width) // 2
+                            reg_y = 68
+                            draw.text((reg_x, reg_y), reg_text, font=registered_font, fill="white")
                             try:
                                 image.save(f'{thumbnail_path}/{image_counter}_cr.jpg')
                                 print(f"[DEBUG] 썸네일 저장 성공: {thumbnail_path}/{image_counter}_cr.jpg")

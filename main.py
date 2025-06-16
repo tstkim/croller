@@ -9,6 +9,7 @@ import time
 import glob
 import os
 import json
+import re
 
 def is_valid_option(text):
     """유효한 선택옵션인지 판단"""
@@ -38,6 +39,10 @@ def is_valid_option(text):
     for pattern in partial_exclude:
         if pattern.lower() in text_lower:
             return False
+    
+    # 2. '선택'으로 끝나는 모든 문자열 제외 (공백 포함)
+    if re.search(r'선택\s*$', text):
+        return True
     
     return True
 
@@ -590,6 +595,8 @@ with sync_playwright() as p:
                         free_gift = "N"
 
                         # 엑셀 헤더 순서에 맞춰 데이터 리스트를 정확히 매핑
+                        if adjusted_price == "가격 정보 없음":
+                            continue  # 최소가격 미만 상품은 엑셀에 추가하지 않음
                         sheet.append([
                             product_code,           # 업체상품코드
                             "",                     # 모델명 (빈 값)

@@ -330,25 +330,78 @@ class FinalAnalyzer:
             # 상세페이지 이미지
             if self.selectors.get('상세페이지'):
                 try:
-                    images = await page.query_selector_all(self.selectors['상세페이지'])
+                    print(f"[DEBUG] 상세페이지 이미지 추출 시작...")
+                    print(f"[DEBUG] 사용할 선택자: {self.selectors['상세페이지']}")
+                    
+                    # lazy loading을 위한 단계적 스크롤
+                    print("[DEBUG] 페이지 스크롤 시작...")
+                    scroll_steps = [0, 0.25, 0.5, 0.75, 1.0]
+                    for step in scroll_steps:
+                        await page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {step})")
+                        await page.wait_for_timeout(500)
+                    
+                    # 다양한 선택자 시도
+                    selectors_to_try = [
+                        self.selectors['상세페이지'],  # SmartDetector가 찾은 선택자
+                        '#prdDetail img',
+                        '.goods_description img',
+                        '.detail img',
+                        '.detail-content img',
+                        '.product-detail img',
+                        '.product-content img',
+                        '.content img',
+                        '.contents img',
+                        'div[class*="detail"] img',
+                        'div[class*="content"] img',
+                        'div[id*="detail"] img',
+                        'img[src*="detail"]',
+                        'img[src*="content"]',
+                        'img'  # 최후의 수단
+                    ]
+                    
                     detail_images = []
-                    for img in images:
-                        src = await img.get_attribute('src')
-                        data_src = await img.get_attribute('data-src')
-                        data_original = await img.get_attribute('data-original')
-                        best_url = data_original or data_src or src
-                        
-                        if best_url:
-                            # URL 정규화
-                            normalized_url = self._normalize_url(best_url, page.url)
-                            # 유효성 검사 및 중복 체크
-                            if (normalized_url and 
-                                self._is_valid_detail_image(normalized_url) and 
-                                normalized_url not in detail_images):
-                                detail_images.append(normalized_url)
+                    for selector in selectors_to_try:
+                        try:
+                            print(f"[DEBUG] 선택자 시도: {selector}")
+                            images = await page.query_selector_all(selector)
+                            print(f"[DEBUG] 찾은 이미지 수: {len(images)}")
+                            
+                            for img in images:
+                                src = await img.get_attribute('src')
+                                data_src = await img.get_attribute('data-src')
+                                data_original = await img.get_attribute('data-original')
+                                best_url = data_original or data_src or src
+                                
+                                if best_url:
+                                    # URL 정규화
+                                    normalized_url = self._normalize_url(best_url, page.url)
+                                    # 썸네일 URL과 동일한지 확인
+                                    thumbnail_url = data.get('썸네일', '')
+                                    
+                                    # 유효성 검사 및 중복 체크
+                                    if (normalized_url and 
+                                        self._is_valid_detail_image(normalized_url) and 
+                                        normalized_url not in detail_images and
+                                        normalized_url != thumbnail_url):
+                                        detail_images.append(normalized_url)
+                                        print(f"[DEBUG] 유효한 상세 이미지 추가: {normalized_url}")
+                            
+                            # 유효한 이미지를 찾았으면 다음 선택자는 시도하지 않음
+                            if detail_images:
+                                print(f"[DEBUG] {selector} 선택자로 {len(detail_images)}개 이미지 찾음")
+                                break
+                                
+                        except Exception as e:
+                            print(f"[DEBUG] {selector} 선택자 오류: {e}")
+                            continue
                     
                     data['상세페이지'] = detail_images[:10]
-                except:
+                    print(f"[DEBUG] 최종 상세페이지 이미지: {len(data['상세페이지'])}개")
+                    
+                except Exception as e:
+                    print(f"[ERROR] 상세페이지 추출 실패: {e}")
+                    import traceback
+                    traceback.print_exc()
                     data['상세페이지'] = []
             else:
                 data['상세페이지'] = []
@@ -395,7 +448,7 @@ class FinalAnalyzer:
         
         return True
         
-        def _normalize_url(self, url, base_url):
+    def _normalize_url(self, url, base_url):
         """상대 URL을 절대 URL로 변환하고 유효성 검사"""
         if not url:
             return None
@@ -417,30 +470,46 @@ class FinalAnalyzer:
             from urllib.parse import urljoin
             return urljoin(base_url, url)
         
-        def _is_valid_detail_image(self, url):
+    def _is_valid_detail_image(self, url):
         """유효한 상세 이미지인지 판단"""
         if not url:
             return False
         
         url_lower = url.lower()
         
-        # 제외할 패턴들
+        # 확실히 제외할 UI 요소들만 필터링
         exclude_patterns = [
-            'logo', 'icon', 'btn', 'menu', 'nav', 
-            'design', 'ui', 'arrow', 'quick', 'zzim'
+            'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
+            'arrow', 'quick', 'zzim', 'wishlist',
+            'banner', 'common', 'header', 'footer',
+            'popup', 'close', 'search', 'cart',
+            'sns', 'facebook', 'twitter', 'kakao',
+            'top_btn', 'scroll', 'floating',
+            # 공통 정보 이미지 필터링 추가
+            '_wg/', 'detail_img_info', 'delivery_info',
+            'exchange_info', 'return_info', 'notice_info'
         ]
         
+        # 특정 패턴이 포함된 경우 무조건 제외
         for pattern in exclude_patterns:
             if pattern in url_lower:
+                print(f"[DEBUG] '{pattern}' 패턴 발견, 이미지 제외: {url}")
                 return False
         
-        # 포함되어야 할 패턴들
-        include_patterns = ['editor', 'goods', 'product', 'data']
-        for pattern in include_patterns:
-            if pattern in url_lower:
-                return True
+        # 포함되어야 하는 패턴들 (상세 이미지 가능성 높음)
+        include_patterns = [
+            'detail', 'content', 'description', 'product',
+            'item', 'goods', 'view', 'main', 'sub'
+        ]
         
-        return False
+        # 상세 패턴이 포함되어 있으면 대부분 허용
+        has_include = any(pattern in url_lower for pattern in include_patterns)
+        
+        # 이미지 확장자가 있으면 대부분 허용
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+        has_image_ext = any(ext in url_lower for ext in image_extensions)
+        
+        return has_include or has_image_ext
     
     def _save_result(self):
         """결과 저장 (SmartDetector 정보 포함)"""

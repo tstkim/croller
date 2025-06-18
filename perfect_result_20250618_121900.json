@@ -1,0 +1,68 @@
+{
+  "선택자": {
+    "상품링크": "a[href*=\"/product/detail.html\"]",
+    "상품리스트": ".goods-list li, .item-list li, [class*=\"item\"], li[class*=\"goods\"], .product-list li, .catalog li",
+    "상품명": "h2",
+    "가격": ".price",
+    "선택옵션": "select:not([name*=\"quantity\"]):not([name*=\"bank\"])",
+    "썸네일": ".thumbnail img",
+    "상세페이지": "#prdDetail img"
+  },
+  "추출데이터": [
+    {
+      "url": "https://littlebigkids.kr/product/detail.html?product_no=398&cate_no=24&display_group=1",
+      "상품명": "[리틀빅키즈] 세계야놀자!올림픽놀이",
+      "가격": "360,000원",
+      "선택옵션": [
+        "없음",
+        "물총놀이(600mm x 600mm) (+12,000)"
+      ],
+      "썸네일": "https://littlebigkids.kr/web/product/big/202404/c3c383b16d7e9078b3513e26b28c148b.jpg",
+      "상세페이지": [
+        "https://littlebigkids.kr/web/upload/NNEditor/20240712/850_EC98ACEBA6BCED94BDEC8381EC84B8ED8E98EC9DB4ECA780_EC9984EC84B1_0527EC8898ECA095_01.jpg",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240822/1.jpg",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240822/2.jpg",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240822/3.jpg",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240822/4.jpg",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240527/850_EC98ACEBA6BCED94BDEC8381EC84B8ED8E98EC9DB4ECA780_EC9984EC84B1_0527EC8898ECA095_06.jpg",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240527/850_EC98ACEBA6BCED94BDEC8381EC84B8ED8E98EC9DB4ECA780_EC9984EC84B1_0527EC8898ECA095_07.jpg"
+      ]
+    },
+    {
+      "url": "https://littlebigkids.kr/product/detail.html?product_no=357&cate_no=24&display_group=3",
+      "상품명": "[리틀빅키즈] 세계다문화여행 무대배경",
+      "가격": "29,600원",
+      "선택옵션": [
+        "2000x1150(mm)",
+        "2000x1300(mm)",
+        "3000x1800(mm)"
+      ],
+      "썸네일": "https://littlebigkids.kr/web/product/big/202409/57c2b70a4603b706e5096487086a9325.png",
+      "상세페이지": [
+        "https://littlebigkids.kr/web/upload/NNEditor/20240906/EB8BA4EBACB8ED999420EC8381EC84B8.png",
+        "https://littlebigkids.kr/web/upload/NNEditor/20240906/copy-1725608606-E29885EC9DB4EBAFB8ECA780EBB3B4ED98B8EBB295.jpg"
+      ]
+    },
+    {
+      "url": "https://littlebigkids.kr/product/detail.html?product_no=354&cate_no=24&display_group=2",
+      "상품명": "[리틀빅키즈] 어버이날 무대배경",
+      "가격": "22,000원",
+      "선택옵션": [
+        "1150mm x 760mm",
+        "2000x1150(mm)",
+        "2000x1300(mm)",
+        "3000x1800(mm)"
+      ],
+      "썸네일": "https://littlebigkids.kr/web/product/big/202306/c7a38c168bce55ef8514e90d1702ddbd.png",
+      "상세페이지": [
+        "https://littlebigkids.kr/web/upload/NNEditor/20230616/EC96B4EBB284EC9DB4EB82A020EBACB4EB8C80EBB0B0EAB2BD-01.png"
+      ]
+    }
+  ],
+  "SmartDetector정보": {
+    "detected_stage": "4단계: 휴리스틱 DOM 탐색",
+    "detection_log": [],
+    "timestamp": "2025-06-18T12:19:00.925873"
+  },
+  "생성일시": "2025-06-18T12:19:00.925885"
+}

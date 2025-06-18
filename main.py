@@ -9,7 +9,6 @@ import time
 import glob
 import os
 import json
-import re
 
 def is_valid_option(text):
     """유효한 선택옵션인지 판단"""
@@ -39,10 +38,6 @@ def is_valid_option(text):
     for pattern in partial_exclude:
         if pattern.lower() in text_lower:
             return False
-    
-    # 2. '선택'으로 끝나는 모든 문자열 제외 (공백 포함)
-    if re.search(r'선택\s*$', text):
-        return True
     
     return True
 
@@ -103,8 +98,9 @@ with sync_playwright() as p:
     page.set_extra_http_headers({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     })
-
-    # 이미지 파일명을 고유하게 만들기 위한 카운터
+    
+    # 이미지 파일명을 고유하게 만들기 위한 카운터와 타임스탬프
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     image_counter = 1
 
     start_time = time.time()
@@ -177,20 +173,17 @@ with sync_playwright() as p:
                 soup = bs(page.content(), 'html.parser')
                 base_url = product_base_url
 
-                # 제품 리스트 선택자 적용 (범용 선택자 사용)
-                product_list_selector = selectors.get("상품리스트", ".goods-list li, .item-list li, [class*='item'], li[class*='goods'], .product-list li, .catalog li")
+                # 제품 리스트 선택자 적용 (perfect_result에서 가져온 선택자 직접 사용)
+                product_list_selector = selectors.get("상품리스트")
                 print(f"[DEBUG] 사용할 상품리스트 선택자: {product_list_selector}")
                 
-                # 여러 선택자를 시도해서 상품 찾기
-                product_list = []
-                for selector in product_list_selector.split(', '):
-                    try:
-                        found_products = soup.select(selector.strip())
-                        if found_products:
-                            product_list.extend(found_products)
-                            print(f"[DEBUG] '{selector.strip()}' 선택자로 {len(found_products)}개 상품 발견")
-                    except:
-                        continue
+                # perfect_result의 선택자로 상품 찾기
+                try:
+                    product_list = soup.select(product_list_selector)
+                    print(f"[DEBUG] 선택자로 {len(product_list)}개 상품 발견")
+                except Exception as e:
+                    print(f"[ERROR] 상품리스트 선택자 오류: {e}")
+                    product_list = []
                 
                 # 중복 제거
                 seen_elements = set()
@@ -251,25 +244,36 @@ with sync_playwright() as p:
                     # 상품명 추출 (개별 상품 페이지에서)
                     product_name = "상품명을 찾을 수 없습니다."
                     try:
-                        # 여러 상품명 선택자 시도
-                        name_selectors = [
-                            selectors["상품명"], ".name", "h1", "h2", ".title", ".product-name", ".goods-name",
-                            ".item-name", "[itemprop='name']"
-                        ]
-                        for name_selector in name_selectors:
-                            try:
-                                name_element = product_soup.select_one(name_selector)
-                                if name_element:
-                                    full_text = name_element.get_text(strip=True)
-                                    if full_text and len(full_text) > 3:  # 의미있는 텍스트인지 확인
-                                        product_name = full_text.split(":", 1)[-1].strip()
-                                        print(f"[PRODUCT] {product_name[:50]}...")
+                        # perfect_result의 선택자로 모든 후보 요소 가져오기
+                        name_elements = product_soup.select(selectors["상품명"])
+                        if name_elements:
+                            # 브랜드명 대괄호가 있는 상품명 우선 선택
+                            best_name = None
+                            for element in name_elements:
+                                text = element.get_text(strip=True)
+                                if text:
+                                    # 제외 패턴 체크
+                                    exclude_patterns = [
+                                        '카테고리', '전체보기', '메뉴', '로그인', '회원가입',
+                                        '장바구니', '주문', '배송', '고객센터'
+                                    ]
+                                    if any(pattern in text for pattern in exclude_patterns):
+                                        continue
+                                    
+                                    # 브랜드명 대괄호가 있으면 우선 선택
+                                    if '[' in text and ']' in text:
+                                        best_name = text
                                         break
-                            except Exception as e:
-                                print(f"[ERROR] 상품명 선택자 오류: {e}")
-                                continue
-                        if product_name == "상품명을 찾을 수 없습니다.":
-                            print("[WARNING] 상품명 추출 실패")
+                                    elif not best_name:  # 브랜드명이 없으면 첫 번째 유효한 텍스트 사용
+                                        best_name = text
+                            
+                            if best_name:
+                                product_name = best_name.split(":", 1)[-1].strip()
+                                print(f"[PRODUCT] {product_name[:50]}...")
+                            else:
+                                print("[WARNING] 유효한 상품명을 찾을 수 없음")
+                        else:
+                            print(f"[WARNING] 선택자 '{selectors['상품명']}'로 상품명을 찾을 수 없음")
                     except Exception as e:
                         logging.error(f"상품명 추출 중 오류 발생: {e}")
                         print(f"[ERROR] 상품명 추출 중 오류: {e}")
@@ -277,15 +281,8 @@ with sync_playwright() as p:
 
                     # 가격
                     try:
-                        price_selectors = [
-                            selectors["가격"], ".price", ".org_price", ".sale_price", "[class*='price']", ".cost", ".amount"
-                        ]
-                        price_element = None
-                        for price_sel in price_selectors:
-                            price_element = product_soup.select_one(price_sel)
-                            if price_element:
-                                print(f"[DEBUG] 가격 선택자 '{price_sel}' 성공")
-                                break
+                        # perfect_result의 선택자만 사용
+                        price_element = product_soup.select_one(selectors["가격"])
                         if price_element:
                             price = price_element.get_text(strip=True)
                             price_display = price.encode('ascii', 'ignore').decode('ascii')
@@ -306,7 +303,7 @@ with sync_playwright() as p:
                                 print(f"[DEBUG] 유효한 가격을 찾을 수 없음: {price_display}")
                         else:
                             adjusted_price = "가격 정보 없음"
-                            print("[DEBUG] 가격 요소를 찾을 수 없음")
+                            print(f"[DEBUG] 선택자 '{selectors['가격']}'로 가격 요소를 찾을 수 없음")
                     except (AttributeError, ValueError) as e:
                         adjusted_price = "가격 정보 없음"
                         logging.error("가격 추출 실패")
@@ -342,8 +339,10 @@ with sync_playwright() as p:
                     try:
                         if thumbnail_url:
                             print(f"[DEBUG] 썸네일 이미지 다운로드 시도: {thumbnail_url}")
-                            urllib.request.urlretrieve(thumbnail_url, f'{thumbnail_path}/{image_counter}_cr.jpg')
-                            im = Image.open(f'{thumbnail_path}/{image_counter}_cr.jpg')
+                            # 원본 이미지를 임시 파일로 저장
+                            temp_filename = f'{thumbnail_path}/{timestamp}_{image_counter}_temp.jpg'
+                            urllib.request.urlretrieve(thumbnail_url, temp_filename)
+                            im = Image.open(temp_filename)
                             im = im.resize((400, 400))
                             image = Image.new("RGB", (600, 600), "white")
                             gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
@@ -432,11 +431,18 @@ with sync_playwright() as p:
                             reg_y = 88  # 빨간색 배경 위에
                             draw.text((reg_x, reg_y), reg_text, font=registered_font, fill="white")
                             try:
-                                image.save(f'{thumbnail_path}/{image_counter}_cr.jpg', quality=95, optimize=False)
-                                print(f"[DEBUG] 썸네일 저장 성공: {thumbnail_path}/{image_counter}_cr.jpg")
+                                image.save(f'{thumbnail_path}/{timestamp}_{image_counter}_cr.jpg', quality=95, optimize=False)
+                                print(f"[DEBUG] 썸네일 저장 성공: {thumbnail_path}/{timestamp}_{image_counter}_cr.jpg")
                             except Exception as e:
                                 print(f"[ERROR] 썸네일 저장 오류: {e}")
                             image.close()
+                            im.close()
+                            # 임시 파일 삭제
+                            try:
+                                os.remove(temp_filename)
+                                print(f"[DEBUG] 임시 파일 삭제: {temp_filename}")
+                            except Exception as e:
+                                print(f"[WARNING] 임시 파일 삭제 실패: {e}")
                         else:
                             print("[WARNING] 썸네일 URL이 없어 이미지 생성 생략")
                     except Exception as e:
@@ -454,7 +460,8 @@ with sync_playwright() as p:
                             logging.error("상세페이지 추출 실패")
                             print("[DEBUG] 상세페이지 추출 실패")
                         combined_image = None
-
+                        detail_img_counter = 0
+                        
                         for img_tag in detail_images:
                             # 여러 속성에서 이미지 URL 찾기
                             img_url = img_tag.get('data-original') or img_tag.get('data-src') or img_tag.get('src')
@@ -465,7 +472,7 @@ with sync_playwright() as p:
                             # 유효한 상세 이미지인지 검사
                             if not is_valid_detail_image(img_url):
                                 continue
-
+                        
                             # 절대 URL로 변환
                             if img_url.startswith('//'):
                                 img_url = 'https:' + img_url
@@ -475,7 +482,8 @@ with sync_playwright() as p:
                                 img_url = product_base_url + '/' + img_url
                             
                             # 이미지 다운로드 및 로컬 저장 경로 설정
-                            img_path = f'{base_path}/detail_{image_counter}.jpg'  # 고유한 파일명 생성
+                            detail_img_counter += 1
+                            img_path = f'{base_path}/detail_{timestamp}_{image_counter}_{detail_img_counter}.jpg'  # 고유한 파일명 생성
                             urllib.request.urlretrieve(img_url, img_path)
                             jm = Image.open(img_path).convert("RGB")
 
@@ -498,8 +506,18 @@ with sync_playwright() as p:
                             for i in range(10):
                                 crop_area = (0, slice_height * i, width, slice_height * (i + 1))  # 이미지 자르는 영역 설정
                                 cropped_img = combined_image.crop(crop_area)  # 이미지 자르기
-                                cropped_img.save(f'{output_path}/{current_image_num:03}_{i + 1:03}.jpg')  # 잘린 이미지 저장
+                                cropped_img.save(f'{output_path}/{timestamp}_{current_image_num:03}_{i + 1:03}.jpg')  # 잘린 이미지 저장
                             combined_image.close()
+                            
+                            # 상세 이미지 임시 파일들 삭제
+                            for idx in range(1, detail_img_counter + 1):
+                                temp_detail_path = f'{base_path}/detail_{timestamp}_{image_counter}_{idx}.jpg'
+                                try:
+                                    if os.path.exists(temp_detail_path):
+                                        os.remove(temp_detail_path)
+                                        print(f"[DEBUG] 상세 임시 파일 삭제: {temp_detail_path}")
+                                except Exception as e:
+                                    print(f"[WARNING] 상세 임시 파일 삭제 실패: {e}")
 
                     except Exception as e:
                         print(f"오류 발생: {e}")
@@ -580,12 +598,12 @@ with sync_playwright() as p:
                         purchase_quantity = "0"
                         tax_status = "y"
                         inventory = "9000"
-                        thumbnail_url_final = f"http://ai.esmplus.com/tstkimtt/{tdate}{code}/cr/{image_counter}_cr.jpg"
+                        thumbnail_url_final = f"http://ai.esmplus.com/tstkimtt/{tdate}{code}/cr/{timestamp}_{image_counter}_cr.jpg"
                         option_type = "" if option_string == "" else "SM"
 
                         description = "<center> <img src='http://gi.esmplus.com/tstkimtt/head.jpg' /><br>"
                         for i in range(1, 11):
-                            description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{current_image_num:03}_{i:03}.jpg' /><br />"
+                            description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{timestamp}_{current_image_num:03}_{i:03}.jpg' /><br />"
                         description += "<img src='http://gi.esmplus.com/tstkimtt/deliver.jpg' /></center>"
 
                         coupon = "쿠폰"
@@ -595,8 +613,6 @@ with sync_playwright() as p:
                         free_gift = "N"
 
                         # 엑셀 헤더 순서에 맞춰 데이터 리스트를 정확히 매핑
-                        if adjusted_price == "가격 정보 없음":
-                            continue  # 최소가격 미만 상품은 엑셀에 추가하지 않음
                         sheet.append([
                             product_code,           # 업체상품코드
                             "",                     # 모델명 (빈 값)
@@ -681,7 +697,7 @@ with sync_playwright() as p:
                             'product_link': product_link,
                             'thumbnail_url': thumbnail_url
                         })
-                        print(f"[INFO] 저장: {image_counter}_cr.jpg | {product_name} | {adjusted_price} | {product_link}")
+                        print(f"[INFO] 저장: {timestamp}_{image_counter}_cr.jpg | {product_name} | {adjusted_price} | {product_link}")
                         image_counter += 1  # 다음 상품을 위해 카운터 증가
                     except Exception as e:
                         logging.error(f"상품 데이터 추가 중 오류 발생: {e}")

@@ -12,17 +12,17 @@ import urllib.request
 import math
 
 # 기본 설정
-code = "dawoori"  # 브랜드영문
-brandname = "다우리"  # 브랜드한글
-category = "학교체육"  # 카테고리 구분
-price_increase_rate = 1  # 가격 인상률 (예: 10% 인상 1.1)
+code = "littlebigkids"  # 브랜드영문
+brandname = "리틀빅키즈"  # 브랜드한글
+category = "39130000"  # 카테고리 구분 (학교체육:39130000)
+price_increase_rate = 1.1  # 가격 인상률 (예: 10% 인상 1.1)
 start_page = 1  # 시작 페이지 번호
-end_page = 16 # 끝 페이지 번호
+end_page = 1 # 끝 페이지 번호
 minimum_price = 10000  # 최소 가격 설정
-use_login = True  # 로그인 사용 여부
-login_url = 'https://dawoori-sports.kr/member/login'  # 로그인 페이지 URL
-catalog_url_template = 'https://dawoori-sports.kr/goods/catalog?page={page}&searchMode=catalog&category=c0019&per=20&filter_display=lattice&code=0019&auto=1&popup=&iframe='  # 카탈로그 페이지 URL 템플릿
-product_base_url = 'https://dawoori-sports.kr'  # 제품 페이지 베이스 URL
+use_login = False  # 로그인 사용 여부
+login_url = 'https://littlebigkids.kr/'  # 로그인 페이지 URL
+catalog_url_template = 'https://littlebigkids.kr/product/list.html?cate_no=24&page={page}'  # 카탈로그 페이지 URL 템플릿
+product_base_url = 'https://littlebigkids.kr/'  # 제품 페이지 베이스 URL
 base_url2= ''  # (필요시만 사용) 2차 이동시 썸네일이나 상세페이지 주소를 위한 도메인
 login_credentials = {
     'userid': 'flowing',
@@ -32,11 +32,14 @@ login_credentials = {
 # 테스트할 상품 개수 (선택자 검증용)
 TEST_PRODUCTS = 3
 
+# 상품 링크 패턴 설정 (사이트별 맞춤 설정)
+PRODUCT_LINK_PATTERN = '/product/detail.html'  # littlebigkids.kr용 (개별 상품 페이지만)
+
 # final_analyzer.py에서 사용할 설정
 LOGIN_REQUIRED = use_login
 MAIN_URL = login_url if use_login else product_base_url
 GALLERY_URL = catalog_url_template.format(page=1)
-SAMPLE_PRODUCT_URL = product_base_url + "/goods/view?no=621"
+SAMPLE_PRODUCT_URL = product_base_url + "product/경찰서무대배경/163/"
 USERNAME = login_credentials['userid']
 PASSWORD = login_credentials['password']
 SITE_NAME = code

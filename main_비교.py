@@ -98,7 +98,7 @@ with sync_playwright() as p:
     page.set_extra_http_headers({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     })
-    
+
     # 이미지 파일명을 고유하게 만들기 위한 카운터
     image_counter = 1
 
@@ -172,17 +172,20 @@ with sync_playwright() as p:
                 soup = bs(page.content(), 'html.parser')
                 base_url = product_base_url
 
-                # 제품 리스트 선택자 적용 (perfect_result에서 가져온 선택자 직접 사용)
-                product_list_selector = selectors.get("상품리스트")
+                # 제품 리스트 선택자 적용 (범용 선택자 사용)
+                product_list_selector = selectors.get("상품리스트", ".goods-list li, .item-list li, [class*='item'], li[class*='goods'], .product-list li, .catalog li")
                 print(f"[DEBUG] 사용할 상품리스트 선택자: {product_list_selector}")
                 
-                # perfect_result의 선택자로 상품 찾기
-                try:
-                    product_list = soup.select(product_list_selector)
-                    print(f"[DEBUG] 선택자로 {len(product_list)}개 상품 발견")
-                except Exception as e:
-                    print(f"[ERROR] 상품리스트 선택자 오류: {e}")
-                    product_list = []
+                # 여러 선택자를 시도해서 상품 찾기
+                product_list = []
+                for selector in product_list_selector.split(', '):
+                    try:
+                        found_products = soup.select(selector.strip())
+                        if found_products:
+                            product_list.extend(found_products)
+                            print(f"[DEBUG] '{selector.strip()}' 선택자로 {len(found_products)}개 상품 발견")
+                    except:
+                        continue
                 
                 # 중복 제거
                 seen_elements = set()
@@ -243,36 +246,25 @@ with sync_playwright() as p:
                     # 상품명 추출 (개별 상품 페이지에서)
                     product_name = "상품명을 찾을 수 없습니다."
                     try:
-                        # perfect_result의 선택자로 모든 후보 요소 가져오기
-                        name_elements = product_soup.select(selectors["상품명"])
-                        if name_elements:
-                            # 브랜드명 대괄호가 있는 상품명 우선 선택
-                            best_name = None
-                            for element in name_elements:
-                                text = element.get_text(strip=True)
-                                if text:
-                                    # 제외 패턴 체크
-                                    exclude_patterns = [
-                                        '카테고리', '전체보기', '메뉴', '로그인', '회원가입',
-                                        '장바구니', '주문', '배송', '고객센터'
-                                    ]
-                                    if any(pattern in text for pattern in exclude_patterns):
-                                        continue
-                                    
-                                    # 브랜드명 대괄호가 있으면 우선 선택
-                                    if '[' in text and ']' in text:
-                                        best_name = text
+                        # 여러 상품명 선택자 시도
+                        name_selectors = [
+                            selectors["상품명"], ".name", "h1", "h2", ".title", ".product-name", ".goods-name",
+                            ".item-name", "[itemprop='name']"
+                        ]
+                        for name_selector in name_selectors:
+                            try:
+                                name_element = product_soup.select_one(name_selector)
+                                if name_element:
+                                    full_text = name_element.get_text(strip=True)
+                                    if full_text and len(full_text) > 3:  # 의미있는 텍스트인지 확인
+                                        product_name = full_text.split(":", 1)[-1].strip()
+                                        print(f"[PRODUCT] {product_name[:50]}...")
                                         break
-                                    elif not best_name:  # 브랜드명이 없으면 첫 번째 유효한 텍스트 사용
-                                        best_name = text
-                            
-                            if best_name:
-                                product_name = best_name.split(":", 1)[-1].strip()
-                                print(f"[PRODUCT] {product_name[:50]}...")
-                            else:
-                                print("[WARNING] 유효한 상품명을 찾을 수 없음")
-                        else:
-                            print(f"[WARNING] 선택자 '{selectors['상품명']}'로 상품명을 찾을 수 없음")
+                            except Exception as e:
+                                print(f"[ERROR] 상품명 선택자 오류: {e}")
+                                continue
+                        if product_name == "상품명을 찾을 수 없습니다.":
+                            print("[WARNING] 상품명 추출 실패")
                     except Exception as e:
                         logging.error(f"상품명 추출 중 오류 발생: {e}")
                         print(f"[ERROR] 상품명 추출 중 오류: {e}")
@@ -280,8 +272,15 @@ with sync_playwright() as p:
 
                     # 가격
                     try:
-                        # perfect_result의 선택자만 사용
-                        price_element = product_soup.select_one(selectors["가격"])
+                        price_selectors = [
+                            selectors["가격"], ".price", ".org_price", ".sale_price", "[class*='price']", ".cost", ".amount"
+                        ]
+                        price_element = None
+                        for price_sel in price_selectors:
+                            price_element = product_soup.select_one(price_sel)
+                            if price_element:
+                                print(f"[DEBUG] 가격 선택자 '{price_sel}' 성공")
+                                break
                         if price_element:
                             price = price_element.get_text(strip=True)
                             price_display = price.encode('ascii', 'ignore').decode('ascii')
@@ -302,7 +301,7 @@ with sync_playwright() as p:
                                 print(f"[DEBUG] 유효한 가격을 찾을 수 없음: {price_display}")
                         else:
                             adjusted_price = "가격 정보 없음"
-                            print(f"[DEBUG] 선택자 '{selectors['가격']}'로 가격 요소를 찾을 수 없음")
+                            print("[DEBUG] 가격 요소를 찾을 수 없음")
                     except (AttributeError, ValueError) as e:
                         adjusted_price = "가격 정보 없음"
                         logging.error("가격 추출 실패")
@@ -338,23 +337,27 @@ with sync_playwright() as p:
                     try:
                         if thumbnail_url:
                             print(f"[DEBUG] 썸네일 이미지 다운로드 시도: {thumbnail_url}")
-                            temp_filename = f'{thumbnail_path}/{image_counter}_temp.jpg'
-                            urllib.request.urlretrieve(thumbnail_url, temp_filename)
-                            im = Image.open(temp_filename)
+                            urllib.request.urlretrieve(thumbnail_url, f'{thumbnail_path}/{image_counter}_cr.jpg')
+                            im = Image.open(f'{thumbnail_path}/{image_counter}_cr.jpg')
                             im = im.resize((400, 400))
                             image = Image.new("RGB", (600, 600), "white")
                             gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
                             image.paste(gray_background, (0, 500))
+                            
                             # 먼저 상품 이미지를 붙임
                             image.paste(im, (100, 100))
+                            
                             # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
+                            # 파란색 배경 (더 크게)
                             blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
                             image.paste(blue_background, (480, 0))
+                            
+                            # 빨간색 하단 부분 (더 크게)
                             red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
                             image.paste(red_badge, (480, 80))
                             draw = ImageDraw.Draw(image)
                             font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
-                            max_text_width = 520
+                            max_text_width = 520  # 600px - 좌우 40px 여백
                             max_font_size = 150
                             min_font_size = 30
                             max_length = 13
@@ -365,6 +368,7 @@ with sync_playwright() as p:
                             text1 = text1.replace("-", "")
                             try:
                                 name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
+                                # 텍스트 폭/높이 계산 및 중앙 정렬
                                 try:
                                     bbox = draw.textbbox((0, 0), text1, font=name_font)
                                     text_width = bbox[2] - bbox[0]
@@ -384,18 +388,22 @@ with sync_playwright() as p:
                                 print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
                             except Exception as e:
                                 print(f"[ERROR] draw.text 오류: {e}")
-                            badge_font_path = "C:/Windows/Fonts/arialbd.ttf"
+                            
+                            # S2B REGISTERED 텍스트 추가
+                            badge_font_path = "C:/Windows/Fonts/arialbd.ttf"  # Arial Bold 폰트 사용
                             try:
-                                s2b_font = ImageFont.truetype(badge_font_path, 60)
-                                registered_font = ImageFont.truetype(badge_font_path, 16)
+                                s2b_font = ImageFont.truetype(badge_font_path, 60)  # S2B 폰트 크기 (더 크게 해서 공백 줄이기)
+                                registered_font = ImageFont.truetype(badge_font_path, 16)  # REGISTERED 폰트 크기 (더 크게)
                             except:
                                 try:
-                                    badge_font_path = "C:/Windows/Fonts/Arial.ttf"
+                                    badge_font_path = "C:/Windows/Fonts/Arial.ttf"  # 일반 Arial로 대체
                                     s2b_font = ImageFont.truetype(badge_font_path, 60)
                                     registered_font = ImageFont.truetype(badge_font_path, 16)
                                 except:
                                     s2b_font = ImageFont.load_default()
                                     registered_font = ImageFont.load_default()
+                            
+                            # S2B 텍스트 그리기 (파란색 배경 위에)
                             s2b_text = "S2B"
                             try:
                                 bbox = draw.textbbox((0, 0), s2b_text, font=s2b_font)
@@ -403,9 +411,11 @@ with sync_playwright() as p:
                                 s2b_height = bbox[3] - bbox[1]
                             except AttributeError:
                                 s2b_width, s2b_height = draw.textsize(s2b_text, font=s2b_font)
-                            s2b_x = 480 + (120 - s2b_width) // 2
-                            s2b_y = 5
+                            s2b_x = 480 + (120 - s2b_width) // 2  # 크게 한 배지에 맞춰 조정
+                            s2b_y = 5  # 더 위로 올려서 공백 줄이기
                             draw.text((s2b_x, s2b_y), s2b_text, font=s2b_font, fill="white")
+                            
+                            # REGISTERED 텍스트 그리기 (빨간색 배경 위에)
                             reg_text = "REGISTERED"
                             try:
                                 bbox = draw.textbbox((0, 0), reg_text, font=registered_font)
@@ -413,8 +423,8 @@ with sync_playwright() as p:
                                 reg_height = bbox[3] - bbox[1]
                             except AttributeError:
                                 reg_width, reg_height = draw.textsize(reg_text, font=registered_font)
-                            reg_x = 480 + (120 - reg_width) // 2
-                            reg_y = 88
+                            reg_x = 480 + (120 - reg_width) // 2  # 크게 한 배지에 맞춰 조정
+                            reg_y = 88  # 빨간색 배경 위에
                             draw.text((reg_x, reg_y), reg_text, font=registered_font, fill="white")
                             try:
                                 image.save(f'{thumbnail_path}/{image_counter}_cr.jpg', quality=95, optimize=False)
@@ -422,12 +432,6 @@ with sync_playwright() as p:
                             except Exception as e:
                                 print(f"[ERROR] 썸네일 저장 오류: {e}")
                             image.close()
-                            im.close()
-                            try:
-                                os.remove(temp_filename)
-                                print(f"[DEBUG] 임시 파일 삭제: {temp_filename}")
-                            except Exception as e:
-                                print(f"[WARNING] 임시 파일 삭제 실패: {e}")
                         else:
                             print("[WARNING] 썸네일 URL이 없어 이미지 생성 생략")
                     except Exception as e:
@@ -445,21 +449,32 @@ with sync_playwright() as p:
                             logging.error("상세페이지 추출 실패")
                             print("[DEBUG] 상세페이지 추출 실패")
                         combined_image = None
+
                         for img_tag in detail_images:
+                            # 여러 속성에서 이미지 URL 찾기
                             img_url = img_tag.get('data-original') or img_tag.get('data-src') or img_tag.get('src')
+                            
                             if not img_url:
-                                continue
+                                continue  # src 속성이 없는 경우 제외
+                            
+                            # 유효한 상세 이미지인지 검사
                             if not is_valid_detail_image(img_url):
                                 continue
+
+                            # 절대 URL로 변환
                             if img_url.startswith('//'):
                                 img_url = 'https:' + img_url
                             elif img_url.startswith('/'):
                                 img_url = product_base_url + img_url
                             elif not img_url.startswith('http'):
                                 img_url = product_base_url + '/' + img_url
-                            img_path = f'{base_path}/detail_{image_counter}.jpg'
+                            
+                            # 이미지 다운로드 및 로컬 저장 경로 설정
+                            img_path = f'{base_path}/detail_{image_counter}.jpg'  # 고유한 파일명 생성
                             urllib.request.urlretrieve(img_url, img_path)
                             jm = Image.open(img_path).convert("RGB")
+
+                            # 이미지를 하나로 합치기
                             if combined_image is None:
                                 combined_image = jm
                             else:
@@ -469,19 +484,23 @@ with sync_playwright() as p:
                                 new_combined_image.paste(combined_image, (0, 0))
                                 new_combined_image.paste(jm, (0, combined_image.height))
                                 combined_image = new_combined_image
+
+                        # 이미지 자르기 및 저장
                         if combined_image is not None:
                             width, height = combined_image.size
-                            current_image_num = image_counter
-                            slice_height = height // 10
+                            current_image_num = image_counter  # 현재 상품 번호 계산
+                            slice_height = height // 10  # 이미지 하나의 높이
                             for i in range(10):
-                                crop_area = (0, slice_height * i, width, slice_height * (i + 1))
-                                cropped_img = combined_image.crop(crop_area)
-                                cropped_img.save(f'{output_path}/{current_image_num:03}_{i + 1:03}.jpg')
+                                crop_area = (0, slice_height * i, width, slice_height * (i + 1))  # 이미지 자르는 영역 설정
+                                cropped_img = combined_image.crop(crop_area)  # 이미지 자르기
+                                cropped_img.save(f'{output_path}/{current_image_num:03}_{i + 1:03}.jpg')  # 잘린 이미지 저장
                             combined_image.close()
+
                     except Exception as e:
                         print(f"오류 발생: {e}")
                         logging.error(f"상세페이지 추출 중 오류 발생: {e}")
                         print(f"[DEBUG] 상세페이지 추출 실패: {e}")
+
 
                     # 옵션 추출 및 추가금액 파싱
                     try:
@@ -561,7 +580,7 @@ with sync_playwright() as p:
 
                         description = "<center> <img src='http://gi.esmplus.com/tstkimtt/head.jpg' /><br>"
                         for i in range(1, 11):
-                            description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{image_counter:03}_{i:03}.jpg' /><br />"
+                            description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{current_image_num:03}_{i:03}.jpg' /><br />"
                         description += "<img src='http://gi.esmplus.com/tstkimtt/deliver.jpg' /></center>"
 
                         coupon = "쿠폰"

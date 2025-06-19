@@ -9,6 +9,8 @@ import time
 import glob
 import os
 import json
+from urllib.parse import urljoin
+from final_analyzer_universal import FinalAnalyzer
 
 def is_valid_option(text):
     """유효한 선택옵션인지 판단"""
@@ -435,28 +437,47 @@ with sync_playwright() as p:
                         continue
                     print(f"[DEBUG] 상품 처리 종료: {product_link_partial}")
 
-                    # 상세 페이지 이미지 저장 및 자르기
+                    # 상세 페이지 이미지 저장 및 자르기 (Playwright DOM 기반, 간결화)
                     try:
-                        detail_images = product_soup.select(selectors["상세페이지"])
-                        if detail_images:
-                            logging.info(f"상세페이지 추출 성공: {len(detail_images)}개")
-                            print(f"[DEBUG] 상세페이지 추출 성공: {len(detail_images)}개")
+                        # 1. Playwright로 스크롤 여러 번 내리기 (동적 로딩 대응)
+                        scroll_steps = [0, 0.25, 0.5, 0.75, 1.0]
+                        for step in scroll_steps:
+                            page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {step})")
+                            page.wait_for_timeout(500)
+
+                        # 2. Playwright의 page.query_selector_all로 img 태그 직접 추출
+                        img_elements = page.query_selector_all('img')
+                        # 썸네일 URL robust하게 추출
+                        thumbnail_element = product_soup.select_one(selectors["썸네일"])
+                        thumbnail_url = None
+                        if thumbnail_element:
+                            thumbnail_url = thumbnail_element.get("data-original") or thumbnail_element.get("data-src") or thumbnail_element.get("src")
+                            if thumbnail_url:
+                                thumbnail_url = urljoin(product_base_url, thumbnail_url)
+                        # 유효성 검사 함수 (final_analyzer_universal.py의 로직 활용)
+                        analyzer = FinalAnalyzer()
+                        detail_img_urls = []
+                        for img in img_elements:
+                            img_url = img.get_attribute('data-original') or img.get_attribute('data-src') or img.get_attribute('src')
+                            if not img_url:
+                                continue
+                            img_url = urljoin(product_base_url, img_url)
+                            # 유효성 검사, 썸네일/중복 방지, 최대 10개
+                            if (analyzer._is_valid_detail_image(img_url)
+                                and img_url not in detail_img_urls
+                                and (not thumbnail_url or img_url != thumbnail_url)):
+                                detail_img_urls.append(img_url)
+                            if len(detail_img_urls) >= 10:
+                                break
+                        if detail_img_urls:
+                            logging.info(f"상세페이지 추출 성공: {len(detail_img_urls)}개")
+                            print(f"[DEBUG] 상세페이지 추출 성공: {len(detail_img_urls)}개")
                         else:
                             logging.error("상세페이지 추출 실패")
                             print("[DEBUG] 상세페이지 추출 실패")
+                        # 3. 이미지 합치기 및 자르기 (기존 로직)
                         combined_image = None
-                        for img_tag in detail_images:
-                            img_url = img_tag.get('data-original') or img_tag.get('data-src') or img_tag.get('src')
-                            if not img_url:
-                                continue
-                            if not is_valid_detail_image(img_url):
-                                continue
-                            if img_url.startswith('//'):
-                                img_url = 'https:' + img_url
-                            elif img_url.startswith('/'):
-                                img_url = product_base_url + img_url
-                            elif not img_url.startswith('http'):
-                                img_url = product_base_url + '/' + img_url
+                        for img_url in detail_img_urls:
                             img_path = f'{base_path}/detail_{image_counter}.jpg'
                             urllib.request.urlretrieve(img_url, img_path)
                             jm = Image.open(img_path).convert("RGB")

@@ -413,39 +413,32 @@ class FinalAnalyzer:
             return None
     
     def _is_valid_option(self, text):
-        """유효한 선택옵션인지 판단"""
+        """유효한 선택옵션인지 판단 (너무 강하지 않게, 안전하게)"""
         if not text:
             return False
-        
+
         text_lower = text.lower().strip()
-        
-        # 완전히 제외할 패턴들 (정확히 일치하는 경우만)
+
+        # 명확히 제외할 패턴들 (은행/결제/배송/안내문구)
         exact_exclude = [
             '선택', '-- 선택 --', '옵션선택', '옵션을 선택해주세요',
-            '- 무게 선택 -', '- 색상 선택 -', '- 사이즈 선택 -',
-            # 추가 필터링 패턴들
             '- [필수] 옵션을 선택해 주세요 -', '-------------------',
             '인터넷뱅킹 바로가기', '선택해주세요', '선택하세요'
         ]
-        
-        # 포함된 경우 제외할 패턴들
         partial_exclude = [
-            '택배(주문 시 결제)', '배송비', '주문 시 결제',
-            # 은행/결제 관련 필터링 추가
-            '인터넷렁킹', '은행', '기업은행', '우체국', '농협',
-            '가상계좌', '계좌', '결제', '카드', '국민은행', '우리은행'
+            '은행', '계좌', '결제', '카드', '배송', '수령', 'pay', 'bank', 'delivery', 'shipping', 'account', 'method'
         ]
-        
-        # 정확히 일치하는 제외 패턴 확인
+
+        # 정확히 일치하는 제외 패턴
         for pattern in exact_exclude:
             if text.strip() == pattern or text_lower == pattern.lower():
                 return False
-        
-        # 부분 일치하는 제외 패턴 확인
+
+        # 부분 일치(단어 단위)만 제외 (너무 긴 옵션은 제외하지 않음)
         for pattern in partial_exclude:
-            if pattern.lower() in text_lower:
+            if pattern in text_lower and len(text_lower) <= 10:
                 return False
-        
+
         return True
         
     def _normalize_url(self, url, base_url):
@@ -493,7 +486,7 @@ class FinalAnalyzer:
         # 특정 패턴이 포함된 경우 무조건 제외
         for pattern in exclude_patterns:
             if pattern in url_lower:
-                print(f"[DEBUG] '{pattern}' 패턴 발견, 이미지 제외: {url}")
+                # print(f"[DEBUG] '{pattern}' 패턴 발견, 이미지 제외: {url}")  # 디버깅 메시지 주석처리
                 return False
         
         # 포함되어야 하는 패턴들 (상세 이미지 가능성 높음)

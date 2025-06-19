@@ -56,21 +56,30 @@ def is_valid_detail_image(url):
     
     # 제외할 패턴들
     exclude_patterns = [
-        'logo', 'icon', 'btn', 'menu', 'nav', 
-        'design', 'ui', 'arrow', 'quick', 'zzim'
+        'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
+        'arrow', 'quick', 'zzim', 'wishlist',
+        'banner', 'common', 'header', 'footer',
+        'popup', 'close', 'search', 'cart',
+        'sns', 'facebook', 'twitter', 'kakao',
+        'top_btn', 'scroll', 'floating',
+        '_wg/', 'detail_img_info', 'delivery_info',
+        'exchange_info', 'return_info', 'notice_info'
     ]
     
     for pattern in exclude_patterns:
         if pattern in url_lower:
+            # print(f"[DEBUG] '{pattern}' 패턴 발견, 이미지 제외: {url}")  # 디버깅 메시지 주석처리
             return False
     
     # 포함되어야 할 패턴들
-    include_patterns = ['editor', 'goods', 'product', 'data']
-    for pattern in include_patterns:
-        if pattern in url_lower:
-            return True
-    
-    return False
+    include_patterns = [
+        'detail', 'content', 'description', 'product',
+        'item', 'goods', 'view', 'main', 'sub'
+    ]
+    has_include = any(pattern in url_lower for pattern in include_patterns)
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+    has_image_ext = any(ext in url_lower for ext in image_extensions)
+    return has_include or has_image_ext
 
 def get_fitting_font(draw, text, max_width, font_path, max_font_size=65, min_font_size=30):
     """상품명 길이에 따라 글자 크기를 동적으로 조정 (최소 30pt)"""
@@ -678,6 +687,11 @@ with sync_playwright() as p:
                         })
                         print(f"[INFO] 저장: {image_counter}_cr.jpg | {product_name} | {adjusted_price} | {product_link}")
                         image_counter += 1  # 다음 상품을 위해 카운터 증가
+
+                        # 상품 개수 제한 (테스트 모드)
+                        if TEST_MODE and image_counter > TEST_PRODUCT_COUNT:
+                            print(f"[INFO] TEST_MODE: {TEST_PRODUCT_COUNT}개 상품만 추출 후 중단합니다.")
+                            break
                     except Exception as e:
                         logging.error(f"상품 데이터 추가 중 오류 발생: {e}")
                         continue

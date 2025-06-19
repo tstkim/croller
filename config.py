@@ -11,7 +11,13 @@ from PIL import Image, ImageDraw, ImageFont
 import urllib.request
 import math
 
-# 기본 설정
+# ===================== 사용자 편의 테스트 모드 =====================
+# 테스트 모드가 True면 상품을 TEST_PRODUCT_COUNT개만 추출하고, 엑셀도 정상 생성됨
+# False면 start_page ~ end_page 전체 페이지 크롤링
+TEST_MODE = True  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
+TEST_PRODUCT_COUNT = 10  # 테스트 모드에서 추출할 상품 개수
+
+# ===================== 기본 설정 =====================
 code = "littlebigkids"  # 브랜드영문
 brandname = "리틀빅키즈"  # 브랜드한글
 category = "39130000"  # 카테고리 구분 (학교체육:39130000)

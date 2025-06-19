@@ -254,45 +254,48 @@ class SmartDetector:
         return None
     
     async def _find_options(self, page):
-        """선택옵션 선택자 탐지 (개선된 버전)"""
-        candidates = [
-            'select[name*="option"]', '.option select', '.options select',
-            'select:not([name*="quantity"]):not([name*="bank"])',
-            'select:nth-of-type(1)', 'select[name*="product"]'
-        ]
-        
-        # 제외할 옵션 패턴들
-        exclude_patterns = [
-            '인터넷렁킹', '은행', '기업은행', '우체국', '농협',
-            '가상계좌', '계좌', '결제', '카드', '국민은행', '우리은행'
-        ]
-        
-        best_candidate = None
-        best_count = 0
-        
-        for selector in candidates:
+        """선택옵션 선택자 탐지 (정교화 버전)"""
+        # 모든 select 태그를 대상으로 name/id/class 속성 분석
+        select_elements = await page.query_selector_all('select')
+        option_keywords = ['option', 'product', 'item', 'select', 'goods', 'size', 'color', 'type', 'style']
+        exclude_keywords = ['bank', 'pay', 'delivery', 'shipping', 'address', 'method', 'account', '결제', '은행', '배송', '수령', '카드', '계좌']
+        best_selector = None
+        best_valid_count = 0
+        for sel in select_elements:
             try:
-                element = await page.query_selector(selector)
-                if element:
-                    options = await page.query_selector_all(f'{selector} option')
-                    if options and len(options) > 1:
-                        # 유효한 옵션 계산
-                        valid_count = 0
-                        for option in options:
-                            text = await option.text_content()
-                            if text:
-                                text = text.strip()
-                                is_bank = any(pattern in text for pattern in exclude_patterns)
-                                if not is_bank and len(text) > 1:
-                                    valid_count += 1
-                        
-                        if valid_count > best_count:
-                            best_count = valid_count
-                            best_candidate = selector
-            except:
+                name = (await sel.get_attribute('name') or '').lower()
+                id_ = (await sel.get_attribute('id') or '').lower()
+                class_ = (await sel.get_attribute('class') or '').lower()
+                attr_str = name + ' ' + id_ + ' ' + class_
+                # 상품 옵션 관련 키워드가 포함되어 있고, 결제/배송/은행 관련 키워드는 없어야 함
+                if any(k in attr_str for k in option_keywords) and not any(k in attr_str for k in exclude_keywords):
+                    # selector 생성
+                    selector = ''
+                    if id_:
+                        selector = f'select#{id_}'
+                    elif class_:
+                        selector = f'select.{".".join(class_.split())}'
+                    elif name:
+                        selector = f'select[name="{name}"]'
+                    else:
+                        continue
+                    # option 텍스트 샘플링
+                    options = await sel.query_selector_all('option')
+                    valid_count = 0
+                    total_count = 0
+                    for option in options:
+                        text = (await option.text_content() or '').strip()
+                        total_count += 1
+                        # 은행/결제/배송 관련 값이 포함된 option은 제외
+                        if not any(k in text for k in exclude_keywords) and len(text) > 1:
+                            valid_count += 1
+                    # 유효 옵션 비율이 50% 이상이고, 2개 이상이면 후보로 삼음
+                    if total_count > 1 and valid_count / total_count >= 0.5 and valid_count > best_valid_count:
+                        best_valid_count = valid_count
+                        best_selector = selector
+            except Exception as e:
                 continue
-                
-        return best_candidate if best_count > 1 else None
+        return best_selector if best_selector else None
     
     def get_detection_info(self):
         """탐지 정보 반환"""

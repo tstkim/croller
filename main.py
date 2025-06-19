@@ -596,86 +596,100 @@ with sync_playwright() as p:
 
                         coupon = "쿠폰"
                         category_code = "c"
-                        weight = "25"
+                        weight = " "
                         detailed_description = "상세설명일괄참조"
                         free_gift = "N"
 
                         # 엑셀 헤더 순서에 맞춰 데이터 리스트를 정확히 매핑
                         sheet.append([
                             product_code,           # 업체상품코드
-                            "",                     # 모델명 (빈 값)
-                            brand,                  # 브랜드
-                            manufacturer,           # 제조사
-                            origin,                 # 원산지
-                            product_name,           # 상품명
-                            "",                     # 홍보문구 (빈 값)
-                            "",                     # 요약상품명 (빈 값)
-                            category,               # 카테고리코드
-                            attributes,             # 사용자분류명 (또는 적절한 값)
-                            "",                     # 한줄메모 (빈 값)
-                            "",                     # 시중가 (빈 값)
-                            "",                     # 원가 (빈 값)
-                            "",                     # 표준공급가 (빈 값)
-                            adjusted_price,         # 판매가
-                            payment_method,         # 배송방법
-                            shipping_fee,           # 배송비
-                            purchase_quantity,      # 구매수량
-                            tax_status,             # 과세여부
-                            inventory,              # 판매수량
-                            thumbnail_url_final,    # 이미지1URL
-                            thumbnail_url_final,    # 이미지2URL
-                            "",                     # 이미지3URL (빈 값)
-                            "",                     # 이미지4URL (빈 값)
-                            "",                     # GIF생성 (빈 값)
-                            "",                     # 이미지6URL (빈 값)
-                            "",                     # 이미지7URL (빈 값)
-                            "",                     # 이미지8URL (빈 값)
-                            "",                     # 이미지9URL (빈 값)
-                            "",                     # 이미지10URL (빈 값)
-                            "",                     # 추가정보입력사항 (빈 값)
-                            option_type,            # 옵션타입
-                            option_string,          # 옵션구분 (또는 옵션 문자열)
-                            "",                     # 선택옵션 (빈 값)
-                            "",                     # 입력형옵션 (빈 값)
-                            "",                     # 추가구매옵션 (빈 값)
-                            description,            # 상세설명
-                            "",                     # 추가상세설명 (빈 값)
-                            "",                     # 광고/홍보 (빈 값)
-                            "",                     # 제조일자 (빈 값)
-                            "",                     # 유효일자 (빈 값)
-                            "",                     # 사은품내용 (빈 값)
-                            coupon,                 # 키워드 (쿠폰)
-                            "",                     # 인증구분 (빈 값)
-                            category_code,          # 인증정보 (카테고리코드)
-                            "",                     # 거래처 (빈 값)
-                            "",                     # 영어상품명 (빈 값)
-                            "",                     # 중국어상품명 (빈 값)
-                            "",                     # 일본어상품명 (빈 값)
-                            "",                     # 영어상세설명 (빈 값)
-                            "",                     # 중국어상세설명 (빈 값)
-                            "",                     # 일본어상세설명 (빈 값)
-                            weight,                 # 상품무게
-                            "",                     # 영어키워드 (빈 값)
-                            "",                     # 중국어키워드 (빈 값)
-                            "",                     # 일본어키워드 (빈 값)
-                            "",                     # 생산지국가 (빈 값)
-                            "",                     # 전세계배송코드 (빈 값)
-                            "",                     # 사이즈 (빈 값)
-                            "",                     # 포장방법 (빈 값)
-                            "",                     # 상품상세코드 (빈 값)
-                            detailed_description,   # 상품상세1
-                            detailed_description,   # 상품상세2
-                            detailed_description,   # 상품상세3
-                            detailed_description,   # 상품상세4
-                            detailed_description,   # 상품상세5
-                            detailed_description,   # 상품상세6
-                            free_gift,              # 상품상세7 (사은품여부)
-                            detailed_description,   # 상품상세8
-                            detailed_description,   # 상품상세9
-                            detailed_description,   # 상품상세10
-                            detailed_description,   # 상품상세11
-                            detailed_description,   # 상품상세12
-                            thumbnail_url           # 상품상세13 (마지막에 이미지 URL)
+                            "",                    # 모델명
+                            brand,                 # 브랜드
+                            manufacturer,          # 제조사
+                            origin,                # 원산지
+                            product_name,          # 상품명
+                            "",                    # 홍보문구
+                            "",                    # 요약상품명
+                            category,              # 카테고리코드
+                            attributes,            # 사용자분류명
+                            "",                    # 한줄메모
+                            "",                    # 시중가
+                            "",                    # 원가
+                            "",                    # 표준공급가
+                            adjusted_price,        # 판매가
+                            payment_method,        # 배송방법
+                            shipping_fee,          # 배송비
+                            purchase_quantity,     # 구매수량
+                            tax_status,            # 과세여부
+                            inventory,             # 판매수량
+                            thumbnail_url_final,   # 이미지1URL
+                            thumbnail_url_final,   # 이미지2URL
+                            "",                    # 이미지3URL
+                            "",                    # 이미지4URL
+                            "",                    # GIF생성
+                            "",                    # 이미지6URL
+                            "",                    # 이미지7URL
+                            "",                    # 이미지8URL
+                            "",                    # 이미지9URL
+                            "",                    # 이미지10URL
+                            "",                    # 추가정보입력사항
+                            option_type,           # 옵션구분(기존 옵션타입)
+                            option_string,         # 선택옵션(기존 옵션구분)
+                            "",                    # 입력형옵션
+                            "",                    # 추가구매옵션
+                            description,           # 상세설명
+                            "",                    # 추가상세설명
+                            "",                    # 광고/홍보
+                            "",                    # 제조일자
+                            "",                    # 유효일자
+                            coupon,                # 사은품내용(쿠폰)
+                            "",                    # 키워드
+                            "C",                   # 인증구분(기존 인증정보)
+                            "",                    # 인증정보
+                            "",                    # 거래처
+                            "",                    # 영어상품명
+                            "",                    # 중국어상품명
+                            "",                    # 일본어상품명
+                            "",                    # 영어상세설명
+                            "",                    # 중국어상세설명
+                            "",                    # 일본어상세설명
+                            weight,                # 상품무게
+                            "",                    # 영어키워드
+                            "",                    # 중국어키워드
+                            "",                    # 일본어키워드
+                            "",                    # 생산지국가
+                            "",                    # 전세계배송코드
+                            "",                    # 사이즈
+                            "",                    # 포장방법
+                            "25",                  # 표준산업코드(상품상세코드)
+                            "N",                   # 미성년자구매(사은품여부)
+                            "",                    # 상품상세코드(빈 값)
+                            detailed_description,  # 상품상세1
+                            detailed_description,  # 상품상세2
+                            detailed_description,  # 상품상세3
+                            detailed_description,  # 상품상세4
+                            detailed_description,  # 상품상세5
+                            detailed_description,  # 상품상세6
+                            detailed_description,  # 상품상세7
+                            detailed_description,  # 상품상세8
+                            detailed_description,  # 상품상세9
+                            detailed_description,  # 상품상세10
+                            detailed_description,  # 상품상세11
+                            detailed_description,  # 상품상세12
+                            detailed_description,  # 상품상세13
+                            detailed_description,  # 상품상세14
+                            detailed_description,  # 상품상세15
+                            detailed_description,  # 상품상세16
+                            detailed_description,  # 상품상세17
+                            detailed_description,  # 상품상세18
+                            detailed_description,  # 상품상세19
+                            detailed_description,  # 상품상세20
+                            detailed_description,  # 상품상세21
+                            detailed_description,  # 상품상세22
+                            detailed_description,  # 상품상세23
+                            detailed_description,  # 상품상세24
+                            detailed_description,  # 상품상세25
+                            thumbnail_url          # 상품상세26(마지막에 이미지 URL)
                         ])
 
                         product_infos.append({

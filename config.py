@@ -11,10 +11,13 @@ from PIL import Image, ImageDraw, ImageFont
 import urllib.request
 import math
 
+# 테스트할 상품 개수 (선택자 검증용)
+TEST_PRODUCTS = 3
+
 # ===================== 사용자 편의 테스트 모드 =====================
 # 테스트 모드가 True면 상품을 TEST_PRODUCT_COUNT개만 추출하고, 엑셀도 정상 생성됨
 # False면 start_page ~ end_page 전체 페이지 크롤링
-TEST_MODE = True  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
+TEST_MODE = False  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
 TEST_PRODUCT_COUNT = 10  # 테스트 모드에서 추출할 상품 개수
 
 # ===================== 기본 설정 =====================
@@ -23,7 +26,7 @@ brandname = "리틀빅키즈"  # 브랜드한글
 category = "39130000"  # 카테고리 구분 (학교체육:39130000)
 price_increase_rate = 1.1  # 가격 인상률 (예: 10% 인상 1.1)
 start_page = 1  # 시작 페이지 번호
-end_page = 1 # 끝 페이지 번호
+end_page = 9 # 끝 페이지 번호
 minimum_price = 10000  # 최소 가격 설정
 use_login = False  # 로그인 사용 여부
 login_url = 'https://littlebigkids.kr/'  # 로그인 페이지 URL
@@ -35,8 +38,7 @@ login_credentials = {
     'password': 'q6160q6160q'
 }
 
-# 테스트할 상품 개수 (선택자 검증용)
-TEST_PRODUCTS = 3
+
 
 # 상품 링크 패턴 설정 (사이트별 맞춤 설정)
 PRODUCT_LINK_PATTERN = '/product/detail.html'  # littlebigkids.kr용 (개별 상품 페이지만)

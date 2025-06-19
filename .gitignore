@@ -54,6 +54,15 @@ debug/
 *.html
 get-pip.py
 
+# Crawler results and outputs
+output/
+thumbnails/
+details/
+perfect_result_*.json
+*_cr.jpg
+*.jpg
+*.png
+
 # Installation files
 install.bat
 install.sh

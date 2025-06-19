@@ -17,25 +17,25 @@ TEST_PRODUCTS = 3
 # ===================== 사용자 편의 테스트 모드 =====================
 # 테스트 모드가 True면 상품을 TEST_PRODUCT_COUNT개만 추출하고, 엑셀도 정상 생성됨
 # False면 start_page ~ end_page 전체 페이지 크롤링
-TEST_MODE = False  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
+TEST_MODE = True  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
 TEST_PRODUCT_COUNT = 10  # 테스트 모드에서 추출할 상품 개수
 
 # ===================== 기본 설정 =====================
-code = "littlebigkids"  # 브랜드영문
-brandname = "리틀빅키즈"  # 브랜드한글
+code = "kidgym"  # 브랜드영문
+brandname = "키드짐"  # 브랜드한글
 category = "39130000"  # 카테고리 구분 (학교체육:39130000)
-price_increase_rate = 1.1  # 가격 인상률 (예: 10% 인상 1.1)
+price_increase_rate = 1.05  # 가격 인상률 (예: 10% 인상 1.1)
 start_page = 1  # 시작 페이지 번호
 end_page = 9 # 끝 페이지 번호
-minimum_price = 10000  # 최소 가격 설정
+minimum_price = 20000  # 최소 가격 설정
 use_login = False  # 로그인 사용 여부
-login_url = 'https://littlebigkids.kr/'  # 로그인 페이지 URL
-catalog_url_template = 'https://littlebigkids.kr/product/list.html?cate_no=24&page={page}'  # 카탈로그 페이지 URL 템플릿
-product_base_url = 'https://littlebigkids.kr/'  # 제품 페이지 베이스 URL
+login_url = 'https://kidgymb2b.co.kr/member/login.html'  # 로그인 페이지 URL
+catalog_url_template = 'https://kidgymb2b.co.kr/product/list.html?cate_no=223&page={page}'  # 카탈로그 페이지 URL 템플릿
+product_base_url = 'https://kidgymb2b.co.kr/'  # 제품 페이지 베이스 URL
 base_url2= ''  # (필요시만 사용) 2차 이동시 썸네일이나 상세페이지 주소를 위한 도메인
 login_credentials = {
     'userid': 'flowing',
-    'password': 'q6160q6160q'
+    'password': 'q6160q6160q?'
 }
 
 

@@ -263,8 +263,34 @@ with sync_playwright() as p:
                 page.screenshot(path="login_error.png")
 
         visited_links = set()
-        seen_product_names = set()  # 상품명 중복 검증용
+        seen_product_names = set()  # 상품명 중복 검증용 (유효한 상품명만 추가)
         product_infos = []  # (image_counter, product_name, adjusted_price, product_link, ...) 저장용
+        
+        def is_valid_product_name(name):
+            """상품명 유효성 검증 함수"""
+            if not name or not name.strip():
+                return False
+            
+            # 기본값 또는 오류 메시지 제외
+            invalid_patterns = [
+                '상품명을 찾을 수 없습니다', '제품명 없음', '상품명 오류',
+                '좋아요', '장바구니', '버튼', '클릭', '메뉴', '네비게이션',
+                # 키드짐 특화 UI 요소
+                '볼&골대', '댄스&창', '댄스&소셜', '네트게임', '타겟게임',
+                '흔바테감', '네트리더', '게임도구', '음향기기', '무대배경',
+                '교구', '체육용품', '놀이기구', '무대도구'
+            ]
+            
+            # 너무 짧거나 긴 상품명 제외
+            if len(name.strip()) < 2 or len(name.strip()) > 100:
+                return False
+                
+            # 유효하지 않은 패턴 포함 여부 확인
+            for pattern in invalid_patterns:
+                if pattern.lower() in name.lower():
+                    return False
+                    
+            return True
 
         # 페이지 반복 처리
         for page_number in range(start_page, end_page + 1):
@@ -547,12 +573,20 @@ with sync_playwright() as p:
                         print(f"[ERROR] 상품명 추출 중 오류: {e}")
                         product_name = "상품명을 찾을 수 없습니다."
                     
-                    # 상품명 중복 검증 (가이드라인: 카테고리명 잘못 추출 오류 방지)
+                    # 상품명 유효성 및 중복 검증 (개선된 로직)
+                    if not is_valid_product_name(product_name):
+                        print(f"[SKIP] 유효하지 않은 상품명: {product_name}")
+                        logging.info(f"[SKIP] 유효하지 않은 상품명: {product_name}")
+                        continue
+                        
                     if product_name in seen_product_names:
                         logging.info(f"[SKIP] 상품명 중복 감지: {product_name}")
-                        print(f"[SKIP] 상품명 중복 감지: {product_name}")
+                        print(f"[SKIP] 상품명 중복 감지 (카테고리명 오추출 가능성): {product_name}")
                         continue
+                    
+                    # 유효한 상품명만 중복 검증 세트에 추가
                     seen_product_names.add(product_name)
+                    print(f"[PRODUCT_VALID] 유효한 상품명 확인: {product_name[:50]}...")
                     
                     # 가격
                     try:

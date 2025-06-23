@@ -188,9 +188,53 @@ with sync_playwright() as p:
                 print(f"[DEBUG] 사용할 상품리스트 선택자: {product_list_selector}")
                 
                 # perfect_result의 선택자로 상품 찾기
+                # perfect_result의 선택자로 상품 찾기
                 try:
                     product_list = soup.select(product_list_selector)
                     print(f"[DEBUG] 선택자로 {len(product_list)}개 상품 발견")
+                    
+                    # 상품 요소가 실제 내용을 포함하는지 검증
+                    valid_products = []
+                    for p in product_list:
+                        # 상품 링크나 이미지가 있는지 확인
+                        has_link = p.select("a[href]")
+                        has_image = p.select("img")
+                        if has_link or has_image:
+                            valid_products.append(p)
+                    
+                    print(f"[DEBUG] 유효한 상품 요소: {len(valid_products)}개")
+                    
+                    # 유효한 상품이 없으면 fallback 선택자 시도
+                    if len(valid_products) == 0:
+                        print(f"[FALLBACK] 기본 선택자로 유효한 상품을 찾지 못함, fallback 시도...")
+                        fallback_selectors = [
+                            "div[class*='item'], div[class*='product'], div[class*='goods']",
+                            "li[class*='item'], li[class*='product'], li[class*='goods']",
+                            "article, .product-item, .goods-item",
+                            "div:has(a[href*='product']), div:has(a[href*='detail'])"
+                        ]
+                        
+                        for fallback_selector in fallback_selectors:
+                            try:
+                                fallback_list = soup.select(fallback_selector)
+                                print(f"[FALLBACK] {fallback_selector}: {len(fallback_list)}개 발견")
+                                
+                                valid_fallback = []
+                                for p in fallback_list:
+                                    has_link = p.select("a[href]")
+                                    has_image = p.select("img")
+                                    if has_link or has_image:
+                                        valid_fallback.append(p)
+                                
+                                if len(valid_fallback) > 0:
+                                    print(f"[FALLBACK] {fallback_selector}로 {len(valid_fallback)}개 유효한 상품 발견")
+                                    product_list = valid_fallback
+                                    break
+                            except Exception as e:
+                                print(f"[FALLBACK] {fallback_selector} 실패: {e}")
+                    else:
+                        product_list = valid_products
+                        
                 except Exception as e:
                     print(f"[ERROR] 상품리스트 선택자 오류: {e}")
                     product_list = []
@@ -311,6 +355,22 @@ with sync_playwright() as p:
                                         break
                                 except:
                                     continue
+                        
+                        # 디버깅: 상품 요소 내 링크 현황 확인
+                        if not link:
+                            print(f"[DEBUG] 링크 추출 실패, 상품 요소 내 링크 확인...")
+                            all_links = product.select('a[href]')
+                            print(f"[DEBUG] 상품 요소 내 전체 링크 수: {len(all_links)}")
+                            for i, link_elem in enumerate(all_links[:5]):  # 최대 5개만 로그
+                                href = link_elem.get('href', '')
+                                print(f"[DEBUG] 링크 {i+1}: {href}")
+                            
+                            # 마지막 수단: 첫 번째 링크를 강제로 사용
+                            if len(all_links) > 0:
+                                first_link = all_links[0].get('href', '')
+                                if first_link:
+                                    link = first_link
+                                    print(f"[FORCE] 첫 번째 링크 강제 사용: {link[:50]}...")
                         
                         if link and link not in unique_products:
                             unique_products[link] = product

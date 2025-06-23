@@ -14,6 +14,7 @@ import urllib.request
 import urllib.error
 from PIL import Image
 import io
+import hashlib
 
 
 class FinalAnalyzer:
@@ -22,6 +23,8 @@ class FinalAnalyzer:
         self.smart_detector = SmartDetector()
         self.selectors = {}
         self.test_data = []
+        # 중복 이미지 추적을 위한 해시 집합
+        self.image_hashes = set()
     
     async def _detect_product_link_selector(self, page):
         """상품 갤러리에서 상품 링크 a 태그의 선택자를 동적으로 탐지"""
@@ -556,7 +559,11 @@ class FinalAnalyzer:
             'top_btn', 'scroll', 'floating',
             # 공통 정보 이미지 필터링 추가
             '_wg/', 'detail_img_info', 'delivery_info',
-            'exchange_info', 'return_info', 'notice_info'
+            'exchange_info', 'return_info', 'notice_info',
+            # 키드짐 특화 워터마크 및 UI 요소 필터링
+            'watermark', 'watermark3', 'sold_out', 'stamp',
+            '0516100/', 'overlay', 'badge', 'mark',
+            'thumbnail_', '_thumb', 'list_', '_list'
         ]
         
         # 특정 패턴이 포함된 경우 무조건 제외
@@ -623,7 +630,28 @@ class FinalAnalyzer:
                 
                 # 660px 이상 조건 확인
                 if width >= 660:
-                    # print(f"[DEBUG] 유효한 이미지 크기: {width}x{height}, URL: {url}")
+                    # 추가 품질 검증: 가로세로 비율 확인
+                    aspect_ratio = width / height
+                    
+                    # 너무 긴 이미지 (10:1 비율 이상) 제외
+                    if aspect_ratio > 10 or aspect_ratio < 0.1:
+                        # print(f"[DEBUG] 비정상 비율: {width}x{height} (ratio: {aspect_ratio:.2f}), URL: {url}")
+                        return False
+                    
+                    # 너무 작은 정사각형 이미지 제외 (100x100 미만)
+                    if width == height and width < 100:
+                        # print(f"[DEBUG] 작은 정사각형 이미지: {width}x{height}, URL: {url}")
+                        return False
+                    
+                    # 중복 이미지 검사 (해시값 기반)
+                    img_hash = hashlib.md5(img_data).hexdigest()
+                    if img_hash in self.image_hashes:
+                        # print(f"[DEBUG] 중복 이미지 발견: {url}")
+                        return False
+                    
+                    # 모든 검증 통과 시 해시 저장 및 승인
+                    self.image_hashes.add(img_hash)
+                    # print(f"[DEBUG] 고품질 이미지 승인: {width}x{height} (ratio: {aspect_ratio:.2f}), URL: {url}")
                     return True
                 else:
                     # print(f"[DEBUG] 이미지 크기 부족: {width}x{height} < 660px, URL: {url}")

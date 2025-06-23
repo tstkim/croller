@@ -625,17 +625,57 @@ with sync_playwright() as p:
                         # 유효성 검사 함수 (final_analyzer_universal.py의 로직 활용)
                         analyzer = FinalAnalyzer()
                         detail_img_urls = []
-                        for img in img_elements:
-                            img_url = img.get_attribute('data-original') or img.get_attribute('data-src') or img.get_attribute('src')
-                            if not img_url:
-                                continue
-                            img_url = urljoin(product_base_url, img_url)
-                            # 유효성 검사, 썸네일/중복 방지, 최대 10개
+                        print(f"[DEBUG] Playwright 실시간 이미지 크기 검증 시작: {len(img_elements)}개 이미지")
+                        
+                        # Playwright로 이미지 크기 사전 검증 (다운로드 전)
+                        valid_img_data = page.evaluate("""
+                            () => {
+                                const images = document.querySelectorAll('img');
+                                const validImages = [];
+                                
+                                for (let img of images) {
+                                    // naturalWidth/naturalHeight로 실제 이미지 크기 확인
+                                    if (img.naturalWidth >= 660) {
+                                        const imgUrl = img.getAttribute('data-original') || 
+                                                     img.getAttribute('data-src') || 
+                                                     img.getAttribute('src');
+                                        if (imgUrl) {
+                                            validImages.push({
+                                                url: imgUrl,
+                                                width: img.naturalWidth,
+                                                height: img.naturalHeight,
+                                                aspectRatio: img.naturalWidth / img.naturalHeight
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                return validImages;
+                            }
+                        """)
+                        
+                        print(f"[DEBUG] Playwright 크기 검증 완료: {len(valid_img_data)}개 이미지가 660px 이상")
+                        
+                        # 사전 검증된 이미지들을 FinalAnalyzer로 2차 검증
+                        for img_data in valid_img_data:
+                            img_url = urljoin(product_base_url, img_data['url'])
+                            width = img_data['width']
+                            height = img_data['height']
+                            aspect_ratio = img_data['aspectRatio']
+                            
+                            print(f"[DEBUG] 사전 검증 통과 이미지: {width}x{height} (ratio: {aspect_ratio:.2f})")
+                            
+                            # FinalAnalyzer로 2차 검증 (워터마크, 중복 등)
                             if (analyzer._is_valid_detail_image(img_url)
                                 and img_url not in detail_img_urls
                                 and (not thumbnail_url or img_url != thumbnail_url)):
                                 detail_img_urls.append(img_url)
+                                print(f"[DEBUG] 최종 승인 이미지: {width}x{height}, URL: {img_url}")
+                            else:
+                                print(f"[DEBUG] FinalAnalyzer에서 거부된 이미지: {img_url}")
+                            
                             if len(detail_img_urls) >= 10:
+                                print(f"[DEBUG] 최대 10개 이미지 달성, 중단")
                                 break
                         if detail_img_urls:
                             logging.info(f"상세페이지 추출 성공: {len(detail_img_urls)}개")

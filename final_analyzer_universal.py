@@ -14,6 +14,9 @@ import urllib.request
 import urllib.error
 from PIL import Image
 import io
+import requests
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 import hashlib
 
 
@@ -25,6 +28,15 @@ class FinalAnalyzer:
         self.test_data = []
         # 중복 이미지 추적을 위한 해시 집합
         self.image_hashes = set()
+        
+        # 성능 최적화 관련 속성
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        self.verified_images_cache = {}  # URL -> (valid, file_size) 캐시
+        self.cache_lock = Lock()
+        self.max_workers = 4
     
     async def _detect_product_link_selector(self, page):
         """상품 갤러리에서 상품 링크 a 태그의 선택자를 동적으로 탐지"""
@@ -593,74 +605,96 @@ class FinalAnalyzer:
         return self._check_image_dimensions(url)
     
     def _check_image_dimensions(self, url):
-        """실제 이미지 크기를 확인하여 660px 이상인지 검증"""
+        """실제 이미지 크기를 확인하여 660px 이상인지 검증 (캐시 활용)"""
+        # 캐시 확인
+        with self.cache_lock:
+            if url in self.verified_images_cache:
+                return self.verified_images_cache[url][0]
+        
+        result = self._verify_single_image_optimized(url)
+        
+        # 캐시에 저장
+        with self.cache_lock:
+            self.verified_images_cache[url] = (result, 0)
+        
+        return result
+    
+    def _verify_single_image_optimized(self, url):
+        """단일 이미지 최적화된 검증"""
         try:
-            # HEAD 요청으로 파일 크기 사전 확인
-            head_req = urllib.request.Request(url, method='HEAD')
-            head_req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            # requests.Session을 사용한 HEAD 요청
+            head_response = self.session.head(url, timeout=10, allow_redirects=True)
             
-            try:
-                with urllib.request.urlopen(head_req, timeout=10) as response:
-                    content_length = response.headers.get('Content-Length')
-                    if content_length:
-                        file_size = int(content_length)
-                        # 50KB 미만이면 제외 (너무 작은 이미지)
-                        if file_size < 50000:
-                            # print(f"[DEBUG] 파일 크기 부족: {file_size} bytes < 50KB, URL: {url}")
-                            return False
-            except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
-                # HEAD 요청 실패 시 실제 다운로드로 진행
-                pass
+            if head_response.status_code == 200:
+                content_length = head_response.headers.get('content-length')
+                if content_length:
+                    file_size = int(content_length)
+                    # 50KB 미만이면 제외
+                    if file_size < 50000:
+                        return False
             
             # 실제 이미지 다운로드하여 크기 확인
-            img_req = urllib.request.Request(url)
-            img_req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            img_response = self.session.get(url, timeout=15)
+            img_response.raise_for_status()
+            img_data = img_response.content
             
-            with urllib.request.urlopen(img_req, timeout=15) as response:
-                img_data = response.read()
+            # 파일 크기 재확인
+            if len(img_data) < 50000:
+                return False
+            
+            # PIL로 이미지 크기 확인
+            img = Image.open(io.BytesIO(img_data))
+            width, height = img.size
+            
+            # 660px 이상 조건 확인
+            if width >= 660:
+                # 추가 품질 검증: 가로세로 비율 확인
+                aspect_ratio = width / height
                 
-                # 파일 크기 재확인
-                if len(img_data) < 50000:
-                    # print(f"[DEBUG] 실제 파일 크기 부족: {len(img_data)} bytes < 50KB, URL: {url}")
+                # 너무 긴 이미지 (10:1 비율 이상) 제외
+                if aspect_ratio > 10 or aspect_ratio < 0.1:
                     return False
                 
-                # PIL로 이미지 크기 확인
-                img = Image.open(io.BytesIO(img_data))
-                width, height = img.size
-                
-                # 660px 이상 조건 확인
-                if width >= 660:
-                    # 추가 품질 검증: 가로세로 비율 확인
-                    aspect_ratio = width / height
-                    
-                    # 너무 긴 이미지 (10:1 비율 이상) 제외
-                    if aspect_ratio > 10 or aspect_ratio < 0.1:
-                        # print(f"[DEBUG] 비정상 비율: {width}x{height} (ratio: {aspect_ratio:.2f}), URL: {url}")
-                        return False
-                    
-                    # 너무 작은 정사각형 이미지 제외 (100x100 미만)
-                    if width == height and width < 100:
-                        # print(f"[DEBUG] 작은 정사각형 이미지: {width}x{height}, URL: {url}")
-                        return False
-                    
-                    # 중복 이미지 검사 (해시값 기반)
-                    img_hash = hashlib.md5(img_data).hexdigest()
-                    if img_hash in self.image_hashes:
-                        # print(f"[DEBUG] 중복 이미지 발견: {url}")
-                        return False
-                    
-                    # 모든 검증 통과 시 해시 저장 및 승인
-                    self.image_hashes.add(img_hash)
-                    # print(f"[DEBUG] 고품질 이미지 승인: {width}x{height} (ratio: {aspect_ratio:.2f}), URL: {url}")
-                    return True
-                else:
-                    # print(f"[DEBUG] 이미지 크기 부족: {width}x{height} < 660px, URL: {url}")
+                # 너무 작은 정사각형 이미지 제외 (100x100 미만)
+                if width == height and width < 100:
                     return False
-                    
+                
+                # 중복 이미지 검사 (해시값 기반)
+                img_hash = hashlib.md5(img_data).hexdigest()
+                if img_hash in self.image_hashes:
+                    return False
+                
+                # 모든 검증 통과 시 해시 저장 및 승인
+                self.image_hashes.add(img_hash)
+                return True
+            else:
+                return False
+                
         except Exception as e:
-            # 네트워크 오류, 이미지 형식 오류 등
-            # print(f"[DEBUG] 이미지 크기 검증 실패: {e}, URL: {url}")
             return False
+    
+    def verify_images_parallel(self, urls):
+        """병렬로 여러 이미지 검증"""
+        if not urls:
+            return {}
+            
+        print(f"[PERF] FinalAnalyzer 병렬 이미지 검증 시작: {len(urls)}개")
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_url = {executor.submit(self._check_image_dimensions, url): url for url in urls}
+            results = {}
+            
+            for future in future_to_url:
+                url = future_to_url[future]
+                try:
+                    results[url] = future.result()
+                except Exception as e:
+                    print(f"[ERROR] 병렬 이미지 검증 실패 {url}: {e}")
+                    results[url] = False
+        
+        valid_count = sum(1 for is_valid in results.values() if is_valid)
+        print(f"[PERF] FinalAnalyzer 병렬 검증 완료: {valid_count}개 유효")
+        return results
     
     def _save_result(self):
         """결과 저장 (SmartDetector 정보 포함)"""
@@ -694,6 +728,11 @@ class FinalAnalyzer:
         print(f"   [THUMB] 썸네일: {self.selectors.get('썸네일', 'FAIL')}")
         print(f"   [DETAIL] 상세페이지: {self.selectors.get('상세페이지', 'FAIL')}")
         print(f"   [DATA] 추출된 상품: {len(self.test_data)}개")
+    
+    def close(self):
+        """세션 정리"""
+        self.session.close()
+        print("[PERF] FinalAnalyzer 세션 정리 완료")
 
 
 if __name__ == "__main__":

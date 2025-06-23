@@ -11,6 +11,100 @@ import os
 import json
 from urllib.parse import urljoin
 from final_analyzer_universal import FinalAnalyzer
+import requests
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+
+class ImageDownloadOptimizer:
+    """이미지 다운로드 성능 최적화 클래스"""
+    
+    def __init__(self, max_workers=4, timeout=15):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        self.max_workers = max_workers
+        self.timeout = timeout
+        self.verified_urls = {}  # URL -> (valid, file_size) 캐시
+        self.lock = Lock()
+        
+    def check_image_size_parallel(self, urls):
+        """병렬로 이미지 크기 검증"""
+        print(f"[PERF] 병렬 이미지 크기 검증 시작: {len(urls)}개 URL")
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_url = {executor.submit(self._check_single_image, url): url for url in urls}
+            results = {}
+            
+            for future in future_to_url:
+                url = future_to_url[future]
+                try:
+                    results[url] = future.result()
+                except Exception as e:
+                    print(f"[ERROR] 이미지 크기 검증 실패 {url}: {e}")
+                    results[url] = (False, 0)
+                    
+        print(f"[PERF] 병렬 검증 완료: {sum(1 for valid, _ in results.values() if valid)}개 유효")
+        return results
+    
+    def _check_single_image(self, url):
+        """단일 이미지 크기 검증 (캐시 활용)"""
+        with self.lock:
+            if url in self.verified_urls:
+                return self.verified_urls[url]
+        
+        try:
+            # HEAD 요청으로 파일 크기 확인
+            head_response = self.session.head(url, timeout=self.timeout, allow_redirects=True)
+            
+            if head_response.status_code == 200:
+                content_length = head_response.headers.get('content-length')
+                if content_length:
+                    file_size = int(content_length)
+                    # 50KB 이상만 유효로 판단
+                    is_valid = file_size >= 50000
+                    
+                    with self.lock:
+                        self.verified_urls[url] = (is_valid, file_size)
+                    
+                    return (is_valid, file_size)
+                    
+        except Exception as e:
+            print(f"[DEBUG] HEAD 요청 실패 {url}: {e}")
+            
+        # HEAD 실패 시 기본값
+        with self.lock:
+            self.verified_urls[url] = (False, 0)
+        return (False, 0)
+    
+    def download_image_optimized(self, url, save_path):
+        """최적화된 이미지 다운로드"""
+        try:
+            response = self.session.get(url, timeout=self.timeout, stream=True)
+            response.raise_for_status()
+            
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            print(f"[PERF] 최적화 다운로드 성공: {save_path}")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] 최적화 다운로드 실패 {url}: {e}")
+            # fallback to urllib
+            try:
+                urllib.request.urlretrieve(url, save_path)
+                print(f"[FALLBACK] urllib 다운로드 성공: {save_path}")
+                return True
+            except Exception as e2:
+                print(f"[ERROR] fallback 다운로드도 실패: {e2}")
+                return False
+    
+    def close(self):
+        """세션 정리"""
+        self.session.close()
 
 def is_valid_option(text):
     """유효한 선택옵션인지 판단"""
@@ -103,6 +197,10 @@ def get_fitting_font(draw, text, max_width, font_path, max_font_size=65, min_fon
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)  # 헤드리스 모드로 변경
     page = browser.new_page()
+    
+    # 성능 최적화 객체 초기화
+    download_optimizer = ImageDownloadOptimizer(max_workers=4, timeout=15)
+    print("[PERF] 이미지 다운로드 최적화 시스템 초기화 완료")
     
     # 데스크탑 모드로 설정
     page.set_viewport_size({"width": 1920, "height": 1080})
@@ -509,7 +607,9 @@ with sync_playwright() as p:
                         if thumbnail_url:
                             print(f"[DEBUG] 썸네일 이미지 다운로드 시도: {thumbnail_url}")
                             temp_filename = f'{thumbnail_path}/{image_counter}_temp.jpg'
-                            urllib.request.urlretrieve(thumbnail_url, temp_filename)
+                            
+                            # 최적화된 다운로드 사용
+                            if download_optimizer.download_image_optimized(thumbnail_url, temp_filename):
                             im = Image.open(temp_filename)
                             im = im.resize((400, 400))
                             image = Image.new("RGB", (600, 600), "white")
@@ -731,21 +831,37 @@ with sync_playwright() as p:
                         else:
                             logging.error("상세페이지 추출 실패")
                             print("[DEBUG] 상세페이지 추출 실패")
-                        # 3. 이미지 합치기 및 자르기 (기존 로직)
+                        # 3. 이미지 합치기 및 자르기 (성능 최적화된 병렬 다운로드)
                         combined_image = None
-                        for img_url in detail_img_urls:
+                        
+                        # 병렬로 이미지 크기 사전 검증
+                        if detail_img_urls:
+                            print(f"[PERF] 상세 이미지 병렬 크기 검증 시작: {len(detail_img_urls)}개")
+                            size_results = download_optimizer.check_image_size_parallel(detail_img_urls)
+                            
+                            # 유효한 이미지만 필터링
+                            valid_detail_urls = [url for url, (is_valid, size) in size_results.items() if is_valid]
+                            print(f"[PERF] 병렬 검증 결과: {len(valid_detail_urls)}개 유효 이미지")
+                        else:
+                            valid_detail_urls = detail_img_urls
+                        
+                        for img_url in valid_detail_urls:
                             img_path = f'{base_path}/detail_{image_counter}.jpg'
-                            urllib.request.urlretrieve(img_url, img_path)
-                            jm = Image.open(img_path).convert("RGB")
-                            if combined_image is None:
-                                combined_image = jm
+                            
+                            # 최적화된 다운로드 사용
+                            if download_optimizer.download_image_optimized(img_url, img_path):
+                                jm = Image.open(img_path).convert("RGB")
+                                if combined_image is None:
+                                    combined_image = jm
+                                else:
+                                    combined_width = max(combined_image.width, jm.width)
+                                    combined_height = combined_image.height + jm.height
+                                    new_combined_image = Image.new("RGB", (combined_width, combined_height), "white")
+                                    new_combined_image.paste(combined_image, (0, 0))
+                                    new_combined_image.paste(jm, (0, combined_image.height))
+                                    combined_image = new_combined_image
                             else:
-                                combined_width = max(combined_image.width, jm.width)
-                                combined_height = combined_image.height + jm.height
-                                new_combined_image = Image.new("RGB", (combined_width, combined_height), "white")
-                                new_combined_image.paste(combined_image, (0, 0))
-                                new_combined_image.paste(jm, (0, combined_image.height))
-                                combined_image = new_combined_image
+                                print(f"[ERROR] 이미지 다운로드 실패, 건너뜀: {img_url}")
                         if combined_image is not None:
                             width, height = combined_image.size
                             current_image_num = image_counter
@@ -1045,6 +1161,9 @@ with sync_playwright() as p:
         logging.error(f"오류 발생: {e}")
 
     finally:
+        # 성능 최적화 객체 정리
+        download_optimizer.close()
+        print("[PERF] 이미지 다운로드 최적화 시스템 정리 완료")
         browser.close()
 
 # 현재 시간을 출력

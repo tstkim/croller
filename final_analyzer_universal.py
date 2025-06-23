@@ -10,6 +10,10 @@ import json
 import re
 from datetime import datetime
 from smart_detector_final import SmartDetector
+import urllib.request
+import urllib.error
+from PIL import Image
+import io
 
 
 class FinalAnalyzer:
@@ -535,12 +539,13 @@ class FinalAnalyzer:
             return urljoin(base_url, url)
         
     def _is_valid_detail_image(self, url):
-        """유효한 상세 이미지인지 판단"""
+        """유효한 상세 이미지인지 판단 (URL 패턴 + 실제 이미지 크기 검증)"""
         if not url:
             return False
         
         url_lower = url.lower()
         
+        # 1단계: URL 패턴 기반 필터링
         # 확실히 제외할 UI 요소들만 필터링
         exclude_patterns = [
             'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
@@ -573,7 +578,61 @@ class FinalAnalyzer:
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
         has_image_ext = any(ext in url_lower for ext in image_extensions)
         
-        return has_include or has_image_ext
+        # URL 패턴 필터링을 통과하지 못하면 바로 거부
+        if not (has_include or has_image_ext):
+            return False
+        
+        # 2단계: 실제 이미지 크기 검증
+        return self._check_image_dimensions(url)
+    
+    def _check_image_dimensions(self, url):
+        """실제 이미지 크기를 확인하여 660px 이상인지 검증"""
+        try:
+            # HEAD 요청으로 파일 크기 사전 확인
+            head_req = urllib.request.Request(url, method='HEAD')
+            head_req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            
+            try:
+                with urllib.request.urlopen(head_req, timeout=10) as response:
+                    content_length = response.headers.get('Content-Length')
+                    if content_length:
+                        file_size = int(content_length)
+                        # 50KB 미만이면 제외 (너무 작은 이미지)
+                        if file_size < 50000:
+                            # print(f"[DEBUG] 파일 크기 부족: {file_size} bytes < 50KB, URL: {url}")
+                            return False
+            except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
+                # HEAD 요청 실패 시 실제 다운로드로 진행
+                pass
+            
+            # 실제 이미지 다운로드하여 크기 확인
+            img_req = urllib.request.Request(url)
+            img_req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            
+            with urllib.request.urlopen(img_req, timeout=15) as response:
+                img_data = response.read()
+                
+                # 파일 크기 재확인
+                if len(img_data) < 50000:
+                    # print(f"[DEBUG] 실제 파일 크기 부족: {len(img_data)} bytes < 50KB, URL: {url}")
+                    return False
+                
+                # PIL로 이미지 크기 확인
+                img = Image.open(io.BytesIO(img_data))
+                width, height = img.size
+                
+                # 660px 이상 조건 확인
+                if width >= 660:
+                    # print(f"[DEBUG] 유효한 이미지 크기: {width}x{height}, URL: {url}")
+                    return True
+                else:
+                    # print(f"[DEBUG] 이미지 크기 부족: {width}x{height} < 660px, URL: {url}")
+                    return False
+                    
+        except Exception as e:
+            # 네트워크 오류, 이미지 형식 오류 등
+            # print(f"[DEBUG] 이미지 크기 검증 실패: {e}, URL: {url}")
+            return False
     
     def _save_result(self):
         """결과 저장 (SmartDetector 정보 포함)"""

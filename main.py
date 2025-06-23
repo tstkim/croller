@@ -210,13 +210,112 @@ with sync_playwright() as p:
                 unique_products = {}
                 for product in product_list:
                     try:
-                        link_element = product.select_one(selectors["상품링크"])
-                        if link_element and 'href' in link_element.attrs:
-                            link = link_element['href']
-                            if link not in unique_products:
-                                unique_products[link] = product
-                    except:
-                        continue
+                        # 범용 상품링크 탐지 (여러 패턴 시도)
+                        link_element = None
+                        link = None
+                        
+                        # 1차 시도: perfect_result의 선택자
+                        try:
+                            link_element = product.select_one(selectors["상품링크"])
+                            if link_element and 'href' in link_element.attrs:
+                                link = link_element['href']
+                        except:
+                            pass
+                        
+                        # 1.5차 시도: Playwright 동적 탐지
+                        if not link:
+                            try:
+                                print(f"[DYNAMIC] 동적 상품링크 패턴 탐지 시작...")
+                                # Playwright로 실시간 href 패턴 분석
+                                pattern_stats = page.evaluate("""
+                                    () => {
+                                        const allLinks = Array.from(document.querySelectorAll('a[href]'));
+                                        const patterns = {};
+                                        
+                                        allLinks.forEach(link => {
+                                            const href = link.href;
+                                            if (href && href.length > 10) {
+                                                // 상품페이지로 보이는 패턴들 수집
+                                                if (href.includes('product') || href.includes('detail') || 
+                                                    href.includes('.html') || href.includes('item')) {
+                                                    
+                                                    // 패턴 생성
+                                                    let pattern = '';
+                                                    if (href.includes('/product/')) pattern = 'a[href*="/product/"]';
+                                                    else if (href.includes('product_no=')) pattern = 'a[href*="product_no="]';
+                                                    else if (href.includes('detail.html')) pattern = 'a[href*="detail.html"]';
+                                                    else if (href.includes('/detail/')) pattern = 'a[href*="/detail/"]';
+                                                    else if (href.includes('.html')) pattern = 'a[href*=".html"]';
+                                                    else pattern = 'a[href*="product"]';
+                                                    
+                                                    patterns[pattern] = (patterns[pattern] || 0) + 1;
+                                                }
+                                            }
+                                        });
+                                        
+                                        // 빈도순으로 정렬하여 반환
+                                        return Object.entries(patterns)
+                                            .sort((a, b) => b[1] - a[1])
+                                            .map(([pattern, count]) => ({pattern, count}));
+                                    }
+                                """)
+                                
+                                if pattern_stats and len(pattern_stats) > 0:
+                                    # 가장 빈도 높은 패턴 사용
+                                    best_pattern = pattern_stats[0]['pattern']
+                                    pattern_count = pattern_stats[0]['count']
+                                    
+                                    print(f"[DYNAMIC] 최적 패턴 발견: {best_pattern} ({pattern_count}개)")
+                                    
+                                    # 발견된 패턴으로 링크 추출 시도
+                                    try:
+                                        links = product.select(best_pattern)
+                                        for link_elem in links:
+                                            href = link_elem.get('href', '')
+                                            if href and any(pattern in href.lower() for pattern in ['product', 'detail', '.html']):
+                                                if not any(exclude in href.lower() for exclude in ['cart', 'wish', 'compare', 'review']):
+                                                    link = href
+                                                    print(f"[DYNAMIC] 동적 탐지 성공: {link[:50]}...")
+                                                    break
+                                    except Exception as pattern_e:
+                                        print(f"[DYNAMIC] 패턴 적용 실패: {pattern_e}")
+                                else:
+                                    print(f"[DYNAMIC] 유효한 패턴을 찾지 못함")
+                                    
+                            except Exception as e:
+                                print(f"[DYNAMIC] 동적 탐지 실패: {e}")
+                        
+                        
+                        # 2차 시도: 범용 상품 링크 패턴들
+                        if not link:
+                            fallback_selectors = [
+                                'a[href*="/product/"]',
+                                'a[href*="detail"]',
+                                'a[href*="product_no"]',
+                                'a[href*=".html"]',
+                                'a[href]'  # 마지막 수단
+                            ]
+                            
+                            for fallback_selector in fallback_selectors:
+                                try:
+                                    links = product.select(fallback_selector)
+                                    for link_elem in links:
+                                        href = link_elem.get('href', '')
+                                        # 상품 상세 페이지로 보이는 링크만 선택
+                                        if href and any(pattern in href.lower() for pattern in ['product', 'detail', '.html']):
+                                            if not any(exclude in href.lower() for exclude in ['cart', 'wish', 'compare', 'review']):
+                                                link = href
+                                                break
+                                    if link:
+                                        print(f"[FALLBACK] {fallback_selector}로 링크 발견: {link[:50]}...")
+                                        break
+                                except:
+                                    continue
+                        
+                        if link and link not in unique_products:
+                            unique_products[link] = product
+                    except Exception as e:
+                        print(f"[ERROR] 상품링크 추출 오류: {e}")
                 
                 print(f"[INFO] 페이지 {page_number}: {len(unique_products)}개 고유 상품 발견")
                 
@@ -513,6 +612,75 @@ with sync_playwright() as p:
                         logging.error(f"상세페이지 추출 중 오류 발생: {e}")
                         print(f"[DEBUG] 상세페이지 추출 실패: {e}")
 
+                    # 상세설명 텍스트 추출 (키드짐 특수 요구사항)
+                    extracted_text_content = ""
+                    try:
+                        print("[DEBUG] 상세설명 텍스트 추출 시작")
+                        
+                        # selectors에서 상세설명텍스트 선택자 가져오기
+                        text_selector = selectors.get("상세설명텍스트", "")
+                        if text_selector:
+                            print(f"[DEBUG] 텍스트 선택자 사용: {text_selector}")
+                            
+                            # Playwright page 객체를 통해 텍스트 추출 (동기식)
+                            try:
+                                # 첫 번째 시도: HTML 서식 유지하여 추출
+                                text_elements = page.query_selector_all(text_selector)
+                                text_blocks = []
+                                
+                                for element in text_elements:
+                                    # innerHTML으로 HTML 서식 유지
+                                    html_content = element.inner_html()
+                                    if html_content and html_content.strip():
+                                        # 기본적인 정제: 스크립트, 스타일 태그 제거
+                                        cleaned_html = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
+                                        cleaned_html = re.sub(r'<style.*?</style>', '', cleaned_html, flags=re.DOTALL)
+                                        
+                                        if len(cleaned_html.strip()) > 20:  # 의미있는 내용만
+                                            text_blocks.append(cleaned_html.strip())
+                                            print(f"[DEBUG] HTML 텍스트 블록 추가: {len(cleaned_html)}자")
+                                
+                                if text_blocks:
+                                    # 텍스트 블록들을 하나로 합치기
+                                    combined_text = '\n'.join(text_blocks)
+                                    
+                                    # 최대 길이 제한 (3000자)
+                                    if len(combined_text) > 3000:
+                                        combined_text = combined_text[:3000] + '...'
+                                    
+                                    extracted_text_content = combined_text
+                                    print(f"[DEBUG] 최종 텍스트 추출 성공: {len(extracted_text_content)}자")
+                                else:
+                                    print("[DEBUG] 유효한 텍스트 블록을 찾을 수 없음")
+                                    
+                            except Exception as e:
+                                print(f"[DEBUG] Playwright 텍스트 추출 실패: {e}")
+                                # BeautifulSoup으로 fallback
+                                try:
+                                    text_elements = product_soup.select(text_selector)
+                                    text_blocks = []
+                                    
+                                    for element in text_elements:
+                                        text_content = element.get_text(separator=' ', strip=True)
+                                        if text_content and len(text_content) > 20:
+                                            text_blocks.append(text_content)
+                                            print(f"[DEBUG] Fallback 텍스트 블록 추가: {len(text_content)}자")
+                                    
+                                    if text_blocks:
+                                        combined_text = '\n\n'.join(text_blocks)
+                                        if len(combined_text) > 3000:
+                                            combined_text = combined_text[:3000] + '...'
+                                        extracted_text_content = combined_text
+                                        print(f"[DEBUG] Fallback 텍스트 추출 성공: {len(extracted_text_content)}자")
+                                except Exception as fallback_e:
+                                    print(f"[DEBUG] Fallback 텍스트 추출도 실패: {fallback_e}")
+                        else:
+                            print("[DEBUG] 상세설명텍스트 선택자가 없음")
+                            
+                    except Exception as e:
+                        print(f"[ERROR] 상세설명 텍스트 추출 실패: {e}")
+                        extracted_text_content = ""
+
                     # 옵션 추출 및 추가금액 파싱
                     try:
                         options = []
@@ -592,6 +760,16 @@ with sync_playwright() as p:
                         description = "<center> <img src='http://gi.esmplus.com/tstkimtt/head.jpg' /><br>"
                         for i in range(1, 11):
                             description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{image_counter:03}_{i:03}.jpg' /><br />"
+                        
+                        # 상세설명 텍스트 블록 삽입 (상세 이미지 다음, 배송 이미지 이전)
+                        if extracted_text_content and extracted_text_content.strip():
+                            description += "<div style='padding:15px; text-align:left; background-color:#f9f9f9; margin:10px; border-radius:5px; font-family:Arial,sans-serif; line-height:1.6;'>"
+                            description += extracted_text_content
+                            description += "</div><br>"
+                            print(f"[DEBUG] 텍스트 블록이 description에 추가됨: {len(extracted_text_content)}자")
+                        else:
+                            print("[DEBUG] 추가할 텍스트 내용이 없음")
+                        
                         description += "<img src='http://gi.esmplus.com/tstkimtt/deliver.jpg' /></center>"
 
                         coupon = "쿠폰"

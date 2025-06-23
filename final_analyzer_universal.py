@@ -398,6 +398,77 @@ class FinalAnalyzer:
                     data['상세페이지'] = detail_images[:10]
                     print(f"[DEBUG] 최종 상세페이지 이미지: {len(data['상세페이지'])}개")
                     
+                    # 상세설명 텍스트 추출 (범용 로직)
+                    try:
+                        print("[DEBUG] 상세설명 텍스트 추출 시작")
+                        detail_text_content = []
+                        
+                        # 범용 텍스트 선택자들 (p, div, article 태그 우선)
+                        text_selectors_to_try = [
+                            self.selectors.get('상세설명텍스트', ''),
+                            '.goods_description p, .goods_description div',
+                            '.product-description p, .product-description div', 
+                            '.detail p, .detail div',
+                            '.content p, .content div',
+                            '.description p, .description div',
+                            '.product-detail p, .product-detail div',
+                            'article p, article div',
+                            '[class*="description"] p, [class*="description"] div',
+                            '[class*="detail"] p, [class*="detail"] div'
+                        ]
+                        
+                        for selector in text_selectors_to_try:
+                            if not selector.strip():
+                                continue
+                                
+                            try:
+                                print(f"[DEBUG] 텍스트 선택자 시도: {selector}")
+                                text_elements = await page.query_selector_all(selector)
+                                print(f"[DEBUG] 찾은 텍스트 요소 수: {len(text_elements)}")
+                                
+                                for element in text_elements:
+                                    # innerHTML 또는 textContent 추출
+                                    html_content = await element.inner_html()
+                                    text_content = await element.inner_text()
+                                    
+                                    # HTML 서식이 있는 경우 HTML 우선, 없으면 텍스트
+                                    if html_content and html_content.strip():
+                                        # 기본적인 HTML 태그 정제 (스크립트, 스타일 제거)
+                                        cleaned_html = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
+                                        cleaned_html = re.sub(r'<style.*?</style>', '', cleaned_html, flags=re.DOTALL)
+                                        
+                                        if len(cleaned_html.strip()) > 10:  # 의미있는 내용만
+                                            detail_text_content.append(cleaned_html.strip())
+                                            print(f"[DEBUG] 유효한 HTML 텍스트 추가: {len(cleaned_html)}자")
+                                    elif text_content and text_content.strip() and len(text_content.strip()) > 10:
+                                        detail_text_content.append(text_content.strip())
+                                        print(f"[DEBUG] 유효한 플레인 텍스트 추가: {len(text_content)}자")
+                                
+                                # 유효한 텍스트를 찾았으면 다음 선택자는 시도하지 않음
+                                if detail_text_content:
+                                    print(f"[DEBUG] {selector} 선택자로 {len(detail_text_content)}개 텍스트 블록 찾음")
+                                    break
+                                    
+                            except Exception as e:
+                                print(f"[DEBUG] {selector} 텍스트 선택자 오류: {e}")
+                                continue
+                        
+                        # 텍스트 통합 및 정제
+                        if detail_text_content:
+                            combined_text = '\n\n'.join(detail_text_content)
+                            # 최대 길이 제한 (5000자)
+                            if len(combined_text) > 5000:
+                                combined_text = combined_text[:5000] + '...'
+                            data['상세설명텍스트'] = combined_text
+                            print(f"[DEBUG] 최종 상세설명 텍스트: {len(combined_text)}자")
+                        else:
+                            data['상세설명텍스트'] = ""
+                            print("[DEBUG] 상세설명 텍스트를 찾을 수 없음")
+                            
+                    except Exception as e:
+                        print(f"[ERROR] 상세설명 텍스트 추출 실패: {e}")
+                        data['상세설명텍스트'] = ""
+                    
                 except Exception as e:
                     print(f"[ERROR] 상세페이지 추출 실패: {e}")
                     import traceback

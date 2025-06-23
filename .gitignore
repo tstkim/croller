@@ -1,68 +1,52 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual Environment
-venv/
-env/
-ENV/
-
-# IDE
+# IDE 설정 파일
+.vs/
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
+*.suo
+*.user
+__pycache__/
+*.pyc
+*.pyo
 
-# Logs
+# 빌드 산출물
+*.exe
+*.dll
+*.pak
+*.dat
+*.bin
+*.log
+
+# 브라우저 관련 파일
+chrome_*.pak
+d3dcompiler_*.dll
+ffmpeg.dll
+icudtl.dat
+libEGL.dll
+libGLESv2.dll
+locales/
+resources.pak
+resources/
+snapshot_blob.bin
+squirrel.exe
+v8_context_snapshot.bin
+vk_swiftshader.*
+vulkan-1.dll
+
+# 로그 파일
 *.log
 app.log
-logs/
+Squirrel-UpdateSelf.log
 
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Project specific
-temp/
-debug/
-*.xlsx
-*.html
-get-pip.py
-
-# Crawler results and outputs
-output/
-thumbnails/
-details/
+# 테스트 결과물
 perfect_result_*.json
-*_cr.jpg
-*.jpg
-*.png
+login_error.png
 
-# Installation files
-install.bat
-install.sh
+# Python 가상환경
+venv/
+env/
+
+# 임시 파일
+*.tmp
+*.temp
+
+# 이미지 출력 폴더 (결과물)
+C:/Users/ME/Pictures/

@@ -25,7 +25,8 @@ class SmartDetector:
             '가격': '.org_price, .price, .sale_price, .cost, .amount, .product-price',
             '선택옵션': 'select:nth-of-type(2), select[name*="option"], .option select',
             '썸네일': '.viewImgWrap img, .product-image img, .main-image img, .thumb img',
-            '상세페이지': '.goods_description img, .product-description img, .detail img, .content img'
+            '상세페이지': '.goods_description img, .product-description img, .detail img, .content img',
+            '상세설명텍스트': '.goods_description p, .product-description p, .detail p, .content p, .description div, .description-content, .product-detail-text'
         }
         
         # 탐지 시도

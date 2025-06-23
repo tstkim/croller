@@ -613,8 +613,7 @@ with sync_playwright() as p:
                             page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {step})")
                             page.wait_for_timeout(500)
 
-                        # 2. Playwright의 page.query_selector_all로 img 태그 직접 추출
-                        img_elements = page.query_selector_all('img')
+                        # 2. 다층 상세페이지 선택자 전략으로 img 태그 추출
                         # 썸네일 URL robust하게 추출
                         thumbnail_element = product_soup.select_one(selectors["썸네일"])
                         thumbnail_url = None
@@ -622,15 +621,64 @@ with sync_playwright() as p:
                             thumbnail_url = thumbnail_element.get("data-original") or thumbnail_element.get("data-src") or thumbnail_element.get("src")
                             if thumbnail_url:
                                 thumbnail_url = urljoin(product_base_url, thumbnail_url)
+                        
                         # 유효성 검사 함수 (final_analyzer_universal.py의 로직 활용)
                         analyzer = FinalAnalyzer()
                         detail_img_urls = []
-                        print(f"[DEBUG] Playwright 실시간 이미지 크기 검증 시작: {len(img_elements)}개 이미지")
                         
-                        # Playwright로 이미지 크기 사전 검증 (다운로드 전)
-                        valid_img_data = page.evaluate("""
-                            () => {
-                                const images = document.querySelectorAll('img');
+                        # 다층 선택자 전략: 우선순위별로 순차 시도
+                        detail_selectors = [
+                            # 1순위: perfect_result 기본 선택자
+                            selectors.get("상세페이지", "#prdDetail img"),
+                            # 2순위: 키드짐 특화 선택자들
+                            "#prdDetailContentLazy img", "#prdDetailContent img",
+                            '.goods_description img', '.product-description img',
+                            # 3순위: 업로드 패턴 기반 선택자들
+                            'img[src*="upload"]', 'img[src*="editor"]', 'img[src*="content"]',
+                            # 4순위: 범용 선택자들
+                            '.product-detail img', '.prd_detail img', '.product_detail img',
+                            '.detail img', '.content img', '#productDetail img',
+                            # 5순위: 최후의 수단
+                            'img'
+                        ]
+                        
+                        selected_images = []
+                        for i, selector in enumerate(detail_selectors, 1):
+                            try:
+                                img_elements = page.query_selector_all(selector)
+                                if img_elements:
+                                    print(f"[FALLBACK] 선택자 {i}/{len(detail_selectors)} 성공: '{selector}' -> {len(img_elements)}개 이미지")
+                                    selected_images = img_elements
+                                    break
+                                else:
+                                    print(f"[DEBUG] 선택자 {i}/{len(detail_selectors)} 실패: '{selector}' -> 0개 이미지")
+                            except Exception as e:
+                                print(f"[DEBUG] 선택자 {i}/{len(detail_selectors)} 오류: '{selector}' -> {e}")
+                                continue
+                        
+                        if not selected_images:
+                            print("[ERROR] 모든 상세페이지 선택자 실패")
+                            raise Exception("상세페이지 이미지 선택자 탐지 실패")
+                            
+                        print(f"[DEBUG] Playwright 실시간 이미지 크기 검증 시작: {len(selected_images)}개 이미지")
+                        
+                        # Playwright로 이미지 크기 사전 검증 (다운로드 전) - 성공한 선택자 사용
+                        successful_selector = None
+                        for i, selector in enumerate(detail_selectors, 1):
+                            try:
+                                test_elements = page.query_selector_all(selector)
+                                if test_elements:
+                                    successful_selector = selector
+                                    break
+                            except:
+                                continue
+                        
+                        if not successful_selector:
+                            successful_selector = 'img'  # 기본값
+                            
+                        valid_img_data = page.evaluate(f"""
+                            () => {{
+                                const images = document.querySelectorAll('{successful_selector}');
                                 const validImages = [];
                                 
                                 for (let img of images) {

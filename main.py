@@ -262,6 +262,7 @@ with sync_playwright() as p:
                 page.screenshot(path="login_error.png")
 
         visited_links = set()
+        seen_product_names = set()  # 상품명 중복 검증용
         product_infos = []  # (image_counter, product_name, adjusted_price, product_link, ...) 저장용
 
         # 페이지 반복 처리
@@ -542,10 +543,17 @@ with sync_playwright() as p:
                         else:
                             print(f"[WARNING] 선택자 '{selectors['상품명']}'로 상품명을 찾을 수 없음")
                     except Exception as e:
-                        logging.error(f"상품명 추출 중 오류 발생: {e}")
+                        logging.error(f"[ERROR] 상품명 추출 중 오류 발생: 선택자 '{selectors['상품명']}' 사용 시 오류 {e}, 후속조치: 기본값으로 설정")
                         print(f"[ERROR] 상품명 추출 중 오류: {e}")
                         product_name = "상품명을 찾을 수 없습니다."
-
+                    
+                    # 상품명 중복 검증 (가이드라인: 카테고리명 잘못 추출 오류 방지)
+                    if product_name in seen_product_names:
+                        logging.info(f"[SKIP] 상품명 중복 감지: {product_name}")
+                        print(f"[SKIP] 상품명 중복 감지: {product_name}")
+                        continue
+                    seen_product_names.add(product_name)
+                    
                     # 가격
                     try:
                         # perfect_result의 선택자만 사용
@@ -560,7 +568,9 @@ with sync_playwright() as p:
                                 original_price = float(clean_price)
                                 adjusted_price = math.ceil((original_price * price_increase_rate) / 100) * 100
                                 if adjusted_price < minimum_price:
-                                    adjusted_price = "가격 정보 없음"
+                                    logging.info(f"[SKIP] minimum_price({minimum_price}) 미달: {adjusted_price}원")
+                                    print(f"[SKIP] minimum_price({minimum_price}) 미달: {adjusted_price}원")
+                                    continue
                                 else:
                                     adjusted_price = int(adjusted_price)
                                     logging.info(f"가격 추출 성공: {adjusted_price}")
@@ -573,7 +583,7 @@ with sync_playwright() as p:
                             print(f"[DEBUG] 선택자 '{selectors['가격']}'로 가격 요소를 찾을 수 없음")
                     except (AttributeError, ValueError) as e:
                         adjusted_price = "가격 정보 없음"
-                        logging.error("가격 추출 실패")
+                        logging.error(f"[ERROR] 가격 추출 중 오류 발생: 선택자 '{selectors['가격']}' 사용 시 오류 {e}, 후속조치: '가격 정보 없음'으로 설정")
                         print(f"[DEBUG] 가격 추출 실패: {e}")
 
                     # 썸네일 이미지 주소 추출 및 저장
@@ -595,10 +605,10 @@ with sync_playwright() as p:
                                 print("[DEBUG] 썸네일 URL 없음")
                         else:
                             thumbnail_url = None
-                            logging.error("썸네일 추출 실패")
+                            logging.error(f"[ERROR] 썸네일 추출 실패: 선택자 '{selectors['썸네일']}'로 요소를 찾을 수 없음, 후속조치: 썸네일 없이 계속 진행")
                             print("[DEBUG] 썸네일 추출 실패")
                     except Exception as e:
-                        logging.error(f"썸네일 이미지 주소 추출 중 오류 발생: {e}")
+                        logging.error(f"[ERROR] 썸네일 이미지 추출 중 오류 발생: 선택자 '{selectors['썸네일']}' 사용 시 오류 {e}, 후속조치: 썸네일 없이 진행")
                         thumbnail_url = None
                         print(f"[DEBUG] 썸네일 추출 실패: {e}")
 
@@ -610,63 +620,63 @@ with sync_playwright() as p:
                             
                             # 최적화된 다운로드 사용
                             if download_optimizer.download_image_optimized(thumbnail_url, temp_filename):
-                            im = Image.open(temp_filename)
-                            im = im.resize((400, 400))
-                            image = Image.new("RGB", (600, 600), "white")
-                            gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
-                            image.paste(gray_background, (0, 500))
-                            # 먼저 상품 이미지를 붙임
-                            image.paste(im, (100, 100))
-                            # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
-                            blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
-                            image.paste(blue_background, (480, 0))
-                            red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
-                            image.paste(red_badge, (480, 80))
-                            draw = ImageDraw.Draw(image)
-                            font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
-                            max_text_width = 520
-                            max_font_size = 150
-                            min_font_size = 30
-                            max_length = 13
-                            if len(product_name) > max_length:
-                                text1 = product_name[:max_length] + "..."
-                            else:
-                                text1 = product_name
-                            text1 = text1.replace("-", "")
-                            try:
-                                name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
+                                im = Image.open(temp_filename)
+                                im = im.resize((400, 400))
+                                image = Image.new("RGB", (600, 600), "white")
+                                gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
+                                image.paste(gray_background, (0, 500))
+                                # 먼저 상품 이미지를 붙임
+                                image.paste(im, (100, 100))
+                                # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
+                                blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
+                                image.paste(blue_background, (480, 0))
+                                red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
+                                image.paste(red_badge, (480, 80))
+                                draw = ImageDraw.Draw(image)
+                                font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
+                                max_text_width = 520
+                                max_font_size = 150
+                                min_font_size = 30
+                                max_length = 13
+                                if len(product_name) > max_length:
+                                    text1 = product_name[:max_length] + "..."
+                                else:
+                                    text1 = product_name
+                                text1 = text1.replace("-", "")
                                 try:
-                                    bbox = draw.textbbox((0, 0), text1, font=name_font)
-                                    text_width = bbox[2] - bbox[0]
-                                    text_height = bbox[3] - bbox[1]
-                                except AttributeError:
-                                    text_width, text_height = draw.textsize(text1, font=name_font)
-                                x = (600 - text_width) // 2
-                                y = 500 + (100 - text_height) // 2
-                                print(f"[DEBUG] 폰트 적용 성공: {name_font.size}pt, 텍스트폭: {text_width}, x좌표: {x}")
-                            except Exception as e:
-                                print(f"[ERROR] 폰트 적용 오류: {e}")
-                                name_font = ImageFont.truetype(font_path, min_font_size)
-                                x = 10
-                                y = 510
-                            try:
-                                draw.text((x, y), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
-                                print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
-                            except Exception as e:
-                                print(f"[ERROR] draw.text 오류: {e}")
-                            badge_font_path = "C:/Windows/Fonts/arialbd.ttf"
-                            try:
-                                s2b_font = ImageFont.truetype(badge_font_path, 60)
-                                registered_font = ImageFont.truetype(badge_font_path, 16)
-                            except:
+                                    name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
+                                    try:
+                                        bbox = draw.textbbox((0, 0), text1, font=name_font)
+                                        text_width = bbox[2] - bbox[0]
+                                        text_height = bbox[3] - bbox[1]
+                                    except AttributeError:
+                                        text_width, text_height = draw.textsize(text1, font=name_font)
+                                    x = (600 - text_width) // 2
+                                    y = 500 + (100 - text_height) // 2
+                                    print(f"[DEBUG] 폰트 적용 성공: {name_font.size}pt, 텍스트폭: {text_width}, x좌표: {x}")
+                                except Exception as e:
+                                    print(f"[ERROR] 폰트 적용 오류: {e}")
+                                    name_font = ImageFont.truetype(font_path, min_font_size)
+                                    x = 10
+                                    y = 510
                                 try:
-                                    badge_font_path = "C:/Windows/Fonts/Arial.ttf"
+                                    draw.text((x, y), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
+                                    print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
+                                except Exception as e:
+                                    print(f"[ERROR] draw.text 오류: {e}")
+                                badge_font_path = "C:/Windows/Fonts/arialbd.ttf"
+                                try:
                                     s2b_font = ImageFont.truetype(badge_font_path, 60)
                                     registered_font = ImageFont.truetype(badge_font_path, 16)
                                 except:
-                                    s2b_font = ImageFont.load_default()
-                                    registered_font = ImageFont.load_default()
-                            s2b_text = "S2B"
+                                    try:
+                                        badge_font_path = "C:/Windows/Fonts/Arial.ttf"
+                                        s2b_font = ImageFont.truetype(badge_font_path, 60)
+                                        registered_font = ImageFont.truetype(badge_font_path, 16)
+                                    except:
+                                        s2b_font = ImageFont.load_default()
+                                        registered_font = ImageFont.load_default()
+                                s2b_text = "S2B"
                             try:
                                 bbox = draw.textbbox((0, 0), s2b_text, font=s2b_font)
                                 s2b_width = bbox[2] - bbox[0]
@@ -781,25 +791,25 @@ with sync_playwright() as p:
                                 const images = document.querySelectorAll('{successful_selector}');
                                 const validImages = [];
                                 
-                                for (let img of images) {
+                                for (let img of images) {{
                                     // naturalWidth/naturalHeight로 실제 이미지 크기 확인
-                                    if (img.naturalWidth >= 660) {
+                                    if (img.naturalWidth >= 660) {{
                                         const imgUrl = img.getAttribute('data-original') || 
                                                      img.getAttribute('data-src') || 
                                                      img.getAttribute('src');
-                                        if (imgUrl) {
-                                            validImages.push({
+                                        if (imgUrl) {{
+                                            validImages.push({{
                                                 url: imgUrl,
                                                 width: img.naturalWidth,
                                                 height: img.naturalHeight,
                                                 aspectRatio: img.naturalWidth / img.naturalHeight
-                                            });
-                                        }
-                                    }
-                                }
+                                            }});
+                                        }}
+                                    }}
+                                }}
                                 
                                 return validImages;
-                            }
+                            }}
                         """)
                         
                         print(f"[DEBUG] Playwright 크기 검증 완료: {len(valid_img_data)}개 이미지가 660px 이상")
@@ -829,7 +839,7 @@ with sync_playwright() as p:
                             logging.info(f"상세페이지 추출 성공: {len(detail_img_urls)}개")
                             print(f"[DEBUG] 상세페이지 추출 성공: {len(detail_img_urls)}개")
                         else:
-                            logging.error("상세페이지 추출 실패")
+                            logging.error(f"[ERROR] 상세페이지 이미지 추출 실패: 선택자 '{selectors['상세페이지']}'로 유효한 이미지를 찾을 수 없음, 후속조치: 상세이미지 없이 계속 진행")
                             print("[DEBUG] 상세페이지 추출 실패")
                         # 3. 이미지 합치기 및 자르기 (성능 최적화된 병렬 다운로드)
                         combined_image = None
@@ -873,7 +883,7 @@ with sync_playwright() as p:
                             combined_image.close()
                     except Exception as e:
                         print(f"오류 발생: {e}")
-                        logging.error(f"상세페이지 추출 중 오류 발생: {e}")
+                        logging.error(f"[ERROR] 상세페이지 이미지 추출 중 오류 발생: 선택자 '{selectors['상세페이지']}' 사용 시 오류 {e}, 후속조치: 빈 상세이미지 목록으로 진행")
                         print(f"[DEBUG] 상세페이지 추출 실패: {e}")
 
                     # 상세설명 텍스트 추출 (키드짐 특수 요구사항)
@@ -977,7 +987,7 @@ with sync_playwright() as p:
                         print(f"[DEBUG] 옵션 추출 성공: {options}")
 
                     except Exception as e:
-                        logging.error(f"옵션 추출 중 오류 발생: {e}")
+                        logging.error(f"[ERROR] 옵션 추출 중 오류 발생: 선택자 '{selectors['선택옵션']}' 사용 시 오류 {e}, 후속조치: 빈 옵션으로 계속 진행")
                         options = []
                         print(f"[DEBUG] 옵션 추출 실패: {e}")
 
@@ -1002,8 +1012,25 @@ with sync_playwright() as p:
                         # print("옵션 문자열:\n", option_string)
 
                     except Exception as e:
-                        logging.error(f"옵션 처리 중 오류 발생: {e}")
+                        logging.error(f"[ERROR] 옵션 처리 중 오류 발생: 옵션 데이터 포맷팅 시 오류 {e}, 후속조치: 빈 옵션 문자열로 계속 진행")
                         option_string = ""
+
+                    # 옵션 상품 가격 검증 (가이드라인: 복잡한 옵션 구조 검증)
+                    try:
+                        # 옵션이 있는 상품인지 확인
+                        has_valid_options = False
+                        if 'options' in locals() and options:
+                            # '없음' 옵션만 있는 경우는 옵션 없는 상품으로 간주
+                            has_valid_options = any(option_name != '없음' for option_name, _ in options)
+                        
+                        # 옵션 상품이면서 가격이 비정상적으로 낮은 경우 검증
+                        if has_valid_options and isinstance(adjusted_price, (int, float)) and adjusted_price < 1000:
+                            logging.info(f"[PRICE_OPTION_ERROR] 옵션 상품 가격 검증 실패: {adjusted_price}원 (옵션 {len(options)}개)")
+                            print(f"[PRICE_OPTION_ERROR] 옵션 상품 가격 검증 실패: {adjusted_price}원 (옵션 {len(options)}개)")
+                            continue
+                    except Exception as e:
+                        logging.error(f"옵션 상품 가격 검증 중 오류: {e}")
+                        # 검증 오류는 전체 중단하지 않고 계속 진행
 
                     # 추가 코드 시작
                     try:
@@ -1141,6 +1168,20 @@ with sync_playwright() as p:
                             'product_link': product_link,
                             'thumbnail_url': thumbnail_url
                         })
+                        
+                        # 부분 성공 검증 및 로깅
+                        partial_issues = []
+                        if not thumbnail_url:
+                            partial_issues.append("썸네일 없음")
+                        if not detail_img_urls:
+                            partial_issues.append("상세이미지 없음")
+                        if adjusted_price == "가격 정보 없음":
+                            partial_issues.append("가격 정보 없음")
+                        
+                        if partial_issues:
+                            logging.info(f"[PARTIAL SUCCESS] 상품 부분 성공: {', '.join(partial_issues)} 문제 있음, 후속조치: 가능한 데이터로 계속 진행")
+                            print(f"[PARTIAL SUCCESS] 상품 부분 성공: {', '.join(partial_issues)}")
+                        
                         print(f"[INFO] 저장: {image_counter}_cr.jpg | {product_name} | {adjusted_price} | {product_link}")
                         image_counter += 1  # 다음 상품을 위해 카운터 증가
 

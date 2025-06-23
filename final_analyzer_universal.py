@@ -170,6 +170,10 @@ class FinalAnalyzer:
             print(f"[FINAL] 최종 선택자 설정 완료 ({len(self.selectors)}개):")
             for key, value in self.selectors.items():
                 print(f"   {key}: {value}")
+            
+            # HTML 구조 분석 디버깅 실행 (DEBUG 모드)
+            debug_mode = True  # 필요시 config.py에서 DEBUG_MODE 변수로 제어 가능
+            await self._debug_html_structure(page, debug_mode)
                 
         except Exception as e:
             print(f"[ERROR] 선택자 분석 실패: {e}")
@@ -227,13 +231,36 @@ class FinalAnalyzer:
             
             data = {'url': url}
             
-            # 상품명 (브랜드명 우선 선택)
-            if self.selectors.get('상품명'):
+            # 상품명 (다중 선택자 시도 + 강화된 필터링)
+            product_name = None
+            
+            # 다양한 상품명 선택자 후보들 (우선순위 순)
+            product_name_selectors = [
+                # 1순위: 상품명 전용 클래스
+                '.product-name', '.product_name', '.goods-name', '.goods_name',
+                '.item-name', '.item_name', '.detail-title', '.product-title',
+                
+                # 2순위: 포괄적 상품명 패턴
+                '[class*="product"][class*="name"]', '[class*="goods"][class*="name"]',
+                '[class*="product"][class*="title"]', '[class*="goods"][class*="title"]',
+                
+                # 3순위: 일반적인 제목 요소 (단, 키드짐에서 문제가 된 .title 제외)
+                'h1', 'h2', 'h3', '.name', 
+                
+                # 4순위: 포괄적 패턴
+                '[class*="name"]:not(.title)', '[class*="title"]:not(.title)',
+                '[class*="product"]', '[class*="goods"]', '[class*="item"]',
+                
+                # 5순위: 기존 perfect_result 선택자 (문제가 있었지만 fallback으로)
+                self.selectors.get('상품명', '.title')
+            ]
+            
+            for selector in product_name_selectors:
                 try:
-                    # 모든 후보 요소 가져오기
-                    elements = await page.query_selector_all(self.selectors['상품명'])
+                    elements = await page.query_selector_all(selector)
+                    if not elements:
+                        continue
                     
-                    # 브랜드명 대괄호가 있는 상품명 우선 선택
                     best_name = None
                     best_score = 0
                     
@@ -243,37 +270,135 @@ class FinalAnalyzer:
                             if text:
                                 text = text.strip()
                                 
-                                # 제외 패턴 체크
+                                # 강화된 제외 패턴 체크
+                                # 강화된 제외 패턴 체크
                                 exclude_patterns = [
+                                    # 키드짐 특화 UI 요소 패턴
+                                    '좋아요', '싫어요', '추천', '찜하기', '관심상품', '북마크', '즐겨찾기',
+                                    '리뷰', '후기', '평가', '별점', '댓글', '문의', '신고',
+                                    
+                                    # 키드짐 특화 카테고리/메뉴 패턴 (강화)
+                                    '볼&골대', '체육용품', '운동기구', '스포츠용품', '놀이기구',
+                                    '네트리더', '타겟게임', '라켓게임', '멀티시스템', 
+                                    '캐치게임', '점프&밸런스', '레크리에이션', '놀이교구',
+                                    '유아체육', '어린이체육', '유아놀이', '어린이놀이',
+                                    
+                                    # 범용 제외 패턴 (강화)
                                     '카테고리', '전체보기', '메뉴', '네비게이션', '로그인', '회원가입',
                                     '장바구니', '주문', '배송', '고객센터', '공지사항', '이벤트',
-                                    '커뮤니티', '게시판', '문의', '리뷰', '소개', '브랜드',
-                                    '옵션', '후기', '상세정보', '문의사항', '상품 옵션', '상품 후기'
+                                    '검색', '정렬', '필터', '브랜드', '제조사', 'FAQ', 'Q&A',
+                                    '이용약관', '개인정보', '정책', '가이드', '도움말'
+                                    '신상품', '인기상품', '할인', '세일', '모델명', '제조사', '원산지',
+                                    'quick', 'menu', 'nav', 'header', 'footer', 'banner',
+                                    
+                                    # 짧은 UI 텍스트
+                                    '더보기', '닫기', '열기', '이전', '다음', '목록', '검색',
+                                    'more', 'close', 'open', 'prev', 'next', 'list', 'search'
                                 ]
                                 
-                                should_exclude = any(pattern in text for pattern in exclude_patterns)
+                                # 제외 패턴 정확 매칭 및 포함 매칭
+                                should_exclude = False
+                                text_lower = text.lower()
+                                
+                                # 정확 매칭 (완전히 같은 경우)
+                                if text in exclude_patterns or text_lower in [p.lower() for p in exclude_patterns]:
+                                    should_exclude = True
+                                
+                                # 포함 매칭 (하지만 너무 짧은 텍스트만)
+                                elif len(text) <= 10 and any(pattern.lower() in text_lower for pattern in exclude_patterns):
+                                    should_exclude = True
+                                
                                 if should_exclude:
                                     continue
-                                    
-                                # 점수 계산
+                                
+                                # 길이 기반 1차 필터링 (상품명 합리적 범위)
+                                if not (5 <= len(text) <= 150):
+                                    continue
+                                
+                                # 점수 계산 (개선된 로직)
                                 score = 0
-                                if 3 <= len(text) <= 100:
+                                
+                                # 길이 점수 (적당한 길이 선호)
+                                if 10 <= len(text) <= 80:
+                                    score += 20
+                                elif 5 <= len(text) <= 150:
                                     score += 10
                                 
-                                # 브랜드명 대괄호 초고점!
-                                if '[' in text and ']' in text:
-                                    score += 50
-                                    
+                                # 클래스명 기반 점수 (상품명 전용 클래스 최우선)
+                                class_name = await element.get_attribute('class') or ''
+                                class_lower = class_name.lower()
+                                
+                                # 상품명 전용 클래스 초고점
+                                if any(pattern in class_lower for pattern in ['product-name', 'goods-name', 'item-name']):
+                                    score += 100
+                                elif any(pattern in class_lower for pattern in ['product-title', 'goods-title', 'detail-title']):
+                                    score += 80
+                                elif any(keyword in class_lower for keyword in ['product', 'goods', 'item']):
+                                    score += 40
+                                
+                                # 태그별 점수
+                                try:
+                                    tag_name = await element.evaluate('el => el.tagName.toLowerCase()')
+                                except:
+                                    tag_name = ''
+                                if tag_name == 'h1':
+                                    score += 30
+                                elif tag_name == 'h2':
+                                    score += 20
+                                elif tag_name == 'h3':
+                                    score += 10
+                                
+                                # 브랜드명 대괄호 점수 (키드짐 특화 및 범용성 강화)
+                                if '[키드짐]' in text or '[kidgym]' in text.lower():
+                                    score += 100  # 키드짐 브랜드명 최고점
+                                elif '[브랜드]' in text.lower() or '[제조사]' in text.lower():
+                                    score += 90   # 일반 브랜드명 고점
+                                elif '[' in text and ']' in text:
+                                    # 대괄호 내용이 일반적인 브랜드명인지 검증
+                                    bracket_content = text[text.find('[')+1:text.find(']')]
+                                    if len(bracket_content) >= 2 and bracket_content.replace(' ', '').isalnum():
+                                        score += 70  # 유효한 브랜드명으로 보이는 대괄호
+                                    else:
+                                        score += 20  # 브랜드명이 아닌 대괄호
+                                
+                                # UI 요소 및 카테고리 감점 강화
+                                if 'title' in class_lower:
+                                    if len(text) <= 10:  # "좋아요" 같은 짧은 title 요소
+                                        score -= 80
+                                    elif any(ui_word in text.lower() for ui_word in ['좋아요', '싫어요', '찜하기', '버튼']):
+                                        score -= 100  # UI 요소 확실
+                                
+                                # 카테고리명 강력 감점
+                                category_indicators = ['볼&골대', '체육용품', '운동기구', '카테고리']
+                                if any(cat in text for cat in category_indicators):
+                                    score -= 200  # 카테고리명 강력 배제
+                                
+                                # 버튼, 링크 요소 감점
+                                parent_tag = ''
+                                try:
+                                    parent = await element.evaluate('el => el.parentElement')
+                                    if parent:
+                                        parent_tag = await parent.evaluate('el => el.tagName.toLowerCase()')
+                                except:
+                                    pass
+                                
+                                if parent_tag in ['button', 'a']:
+                                    score -= 30
                                 if score > best_score:
                                     best_score = score
                                     best_name = text
                     
-                    data['상품명'] = best_name
-                    
+                    # 유효한 상품명을 찾았으면 더 이상 다른 선택자 시도하지 않음
+                    if best_name and best_score >= 20:  # 최소 점수 기준
+                        product_name = best_name
+                        print(f"[SUCCESS] 상품명 추출 성공 (선택자: {selector}, 점수: {best_score}): {product_name[:50]}...")
+                        break
+                        
                 except Exception as e:
-                    data['상품명'] = None
-            else:
-                data['상품명'] = None
+                    print(f"[DEBUG] 선택자 {selector} 시도 실패: {e}")
+                    continue
+            
+            data['상품명'] = product_name
             
             # 가격
             if self.selectors.get('가격'):
@@ -695,6 +820,246 @@ class FinalAnalyzer:
         valid_count = sum(1 for is_valid in results.values() if is_valid)
         print(f"[PERF] FinalAnalyzer 병렬 검증 완료: {valid_count}개 유효")
         return results
+    
+    async def _debug_html_structure(self, page, debug_mode=False):
+        """실시간 HTML 구조 분석 디버깅 기능"""
+        if not debug_mode:
+            return
+            
+        print("\n" + "="*70)
+        print("[DEBUG] HTML 구조 분석 시작...")
+        print("="*70)
+        
+        try:
+            # 현재 페이지 URL 확인
+            current_url = page.url
+            print(f"[DEBUG] 분석 대상 URL: {current_url}")
+            
+            # 모든 텍스트 요소 수집
+            text_elements = await self._collect_text_elements(page)
+            
+            # 상품명 후보 분석
+            await self._analyze_product_name_candidates(text_elements)
+            
+            # 가격 후보 분석
+            await self._analyze_price_candidates(text_elements)
+            
+            # 옵션 후보 분석
+            await self._analyze_option_candidates(text_elements)
+            
+            # 이미지 후보 분석
+            await self._analyze_image_candidates(page)
+            
+            print("="*70)
+            print("[DEBUG] HTML 구조 분석 완료")
+            print("="*70 + "\n")
+            
+        except Exception as e:
+            print(f"[DEBUG ERROR] HTML 구조 분석 실패: {e}")
+            
+    async def _collect_text_elements(self, page):
+        """모든 텍스트 요소와 선택자 수집"""
+        text_elements = []
+        
+        # 다양한 태그에서 텍스트 수집
+        tags_to_check = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div', 'strong', 'b', 'em', 'i', 'td', 'th', 'li', 'a']
+        
+        for tag in tags_to_check:
+            try:
+                elements = await page.query_selector_all(tag)
+                for i, element in enumerate(elements):
+                    text = await element.text_content()
+                    if text and text.strip():
+                        # 클래스와 ID 속성 수집
+                        class_attr = await element.get_attribute('class')
+                        id_attr = await element.get_attribute('id')
+                        
+                        # 선택자 생성
+                        selectors = []
+                        if id_attr:
+                            selectors.append(f"#{id_attr}")
+                        if class_attr:
+                            for cls in class_attr.split():
+                                selectors.append(f".{cls}")
+                        selectors.append(tag)
+                        
+                        text_elements.append({
+                            'text': text.strip(),
+                            'tag': tag,
+                            'selectors': selectors,
+                            'class': class_attr,
+                            'id': id_attr
+                        })
+            except:
+                continue
+                
+        print(f"[DEBUG] 수집된 텍스트 요소: {len(text_elements)}개")
+        return text_elements
+    
+    async def _analyze_product_name_candidates(self, text_elements):
+        """상품명 후보 분석"""
+        print("\n[DEBUG] === 상품명 후보 분석 ===")
+        
+        product_name_keywords = ['product', 'goods', 'item', 'name', 'title']
+        candidates = []
+        
+        for element in text_elements:
+            text = element['text']
+            selectors = element['selectors']
+            
+            # 길이 기반 필터링 (상품명은 보통 10~100자)
+            if 10 <= len(text) <= 100:
+                score = 0
+                
+                # 클래스명에 상품명 관련 키워드 포함시 가점
+                for selector in selectors:
+                    for keyword in product_name_keywords:
+                        if keyword in selector.lower():
+                            score += 20
+                            
+                # 헤더 태그 가점
+                if element['tag'] in ['h1', 'h2', 'h3']:
+                    score += 10
+                    
+                # 카테고리명으로 보이는 텍스트 감점
+                # 카테고리명으로 보이는 텍스트 감점 (강화)
+                exclude_words = [
+                    # 키드짐 특화 카테고리
+                    '카테고리', '분류', '볼&골대', '체육용품', '운동기구', '놀이기구',
+                    '네트리더', '타겟게임', '라켓게임', '멀티시스템', '캐치게임',
+                    '점프&밸런스', '레크리에이션', '놀이교구', '유아체육', '어린이체육',
+                    # 범용 UI 요소
+                    '메뉴', '네비게이션', '검색', '정렬', '필터', '브랜드', '제조사'
+                ]
+                if any(word in text for word in exclude_words):
+                    score -= 50  # 강화된 감점
+                    
+                if score > 0:
+                    candidates.append({
+                        'text': text,
+                        'selectors': selectors,
+                        'score': score
+                    })
+        
+        # 점수순 정렬
+        candidates.sort(key=lambda x: x['score'], reverse=True)
+        
+        print(f"[DEBUG] 상품명 후보 {min(5, len(candidates))}개:")
+        for i, candidate in enumerate(candidates[:5]):
+            print(f"  {i+1}. '{candidate['text'][:50]}...' (점수: {candidate['score']})")
+            print(f"     선택자: {', '.join(candidate['selectors'][:3])}")
+            
+    async def _analyze_price_candidates(self, text_elements):
+        """가격 후보 분석"""
+        print("\n[DEBUG] === 가격 후보 분석 ===")
+        
+        price_patterns = [
+            r'[\d,]+원',
+            r'₩[\d,]+',
+            r'\$[\d,]+\.?\d*',
+            r'[\d,]+\s*won',
+            r'[\d]{1,3}(?:,\d{3})*'
+        ]
+        
+        candidates = []
+        
+        for element in text_elements:
+            text = element['text']
+            selectors = element['selectors']
+            
+            # 가격 패턴 매칭
+            for pattern in price_patterns:
+                if re.search(pattern, text):
+                    score = 10
+                    
+                    # 가격 관련 클래스명 가점
+                    price_keywords = ['price', 'cost', 'amount', 'money', 'won']
+                    for selector in selectors:
+                        for keyword in price_keywords:
+                            if keyword in selector.lower():
+                                score += 25
+                                
+                    # 짧은 텍스트 가점 (가격은 보통 간결함)
+                    if len(text) <= 20:
+                        score += 15
+                        
+                    candidates.append({
+                        'text': text,
+                        'selectors': selectors,
+                        'score': score
+                    })
+                    break
+        
+        # 점수순 정렬
+        candidates.sort(key=lambda x: x['score'], reverse=True)
+        
+        print(f"[DEBUG] 가격 후보 {min(5, len(candidates))}개:")
+        for i, candidate in enumerate(candidates[:5]):
+            print(f"  {i+1}. '{candidate['text']}' (점수: {candidate['score']})")
+            print(f"     선택자: {', '.join(candidate['selectors'][:3])}")
+            
+    async def _analyze_option_candidates(self, text_elements):
+        """선택 옵션 후보 분석"""
+        print("\n[DEBUG] === 선택 옵션 후보 분석 ===")
+        
+        option_keywords = ['option', 'select', 'choice', 'variant', 'size', 'color']
+        candidates = []
+        
+        for element in text_elements:
+            selectors = element['selectors']
+            
+            # 옵션 관련 클래스명 검사
+            for selector in selectors:
+                for keyword in option_keywords:
+                    if keyword in selector.lower():
+                        candidates.append({
+                            'selector': selector,
+                            'text': element['text'][:30] + '...'
+                        })
+                        break
+        
+        print(f"[DEBUG] 옵션 관련 선택자 {min(5, len(candidates))}개:")
+        for i, candidate in enumerate(candidates[:5]):
+            print(f"  {i+1}. {candidate['selector']} -> '{candidate['text']}'")
+            
+    async def _analyze_image_candidates(self, page):
+        """이미지 후보 분석"""
+        print("\n[DEBUG] === 이미지 후보 분석 ===")
+        
+        try:
+            # 모든 이미지 요소 수집
+            images = await page.query_selector_all('img')
+            
+            thumbnail_candidates = []
+            detail_candidates = []
+            
+            for i, img in enumerate(images):
+                src = await img.get_attribute('src')
+                alt = await img.get_attribute('alt') or ''
+                class_attr = await img.get_attribute('class') or ''
+                id_attr = await img.get_attribute('id') or ''
+                
+                if src:
+                    # 썸네일 후보 분석
+                    if any(keyword in class_attr.lower() for keyword in ['thumb', 'thumbnail', 'main', 'primary']):
+                        thumbnail_candidates.append(f"img.{class_attr.split()[0] if class_attr else ''}")
+                    elif any(keyword in id_attr.lower() for keyword in ['thumb', 'thumbnail', 'main']):
+                        thumbnail_candidates.append(f"#{id_attr}")
+                        
+                    # 상세 이미지 후보 분석  
+                    if any(keyword in class_attr.lower() for keyword in ['detail', 'content', 'description']):
+                        detail_candidates.append(f"img.{class_attr.split()[0] if class_attr else ''}")
+                        
+            print(f"[DEBUG] 썸네일 후보 {min(3, len(thumbnail_candidates))}개:")
+            for i, candidate in enumerate(thumbnail_candidates[:3]):
+                print(f"  {i+1}. {candidate}")
+                
+            print(f"[DEBUG] 상세이미지 후보 {min(3, len(detail_candidates))}개:")
+            for i, candidate in enumerate(detail_candidates[:3]):
+                print(f"  {i+1}. {candidate}")
+                
+        except Exception as e:
+            print(f"[DEBUG ERROR] 이미지 분석 실패: {e}")
     
     def _save_result(self):
         """결과 저장 (SmartDetector 정보 포함)"""

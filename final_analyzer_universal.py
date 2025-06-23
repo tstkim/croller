@@ -28,7 +28,6 @@ class FinalAnalyzer:
         self.test_data = []
         # 중복 이미지 추적을 위한 해시 집합
         self.image_hashes = set()
-        
         # 성능 최적화 관련 속성
         self.session = requests.Session()
         self.session.headers.update({
@@ -170,7 +169,6 @@ class FinalAnalyzer:
             print(f"[FINAL] 최종 선택자 설정 완료 ({len(self.selectors)}개):")
             for key, value in self.selectors.items():
                 print(f"   {key}: {value}")
-            
             # HTML 구조 분석 디버깅 실행 (DEBUG 모드)
             debug_mode = True  # 필요시 config.py에서 DEBUG_MODE 변수로 제어 가능
             await self._debug_html_structure(page, debug_mode)
@@ -231,36 +229,13 @@ class FinalAnalyzer:
             
             data = {'url': url}
             
-            # 상품명 (다중 선택자 시도 + 강화된 필터링)
-            product_name = None
-            
-            # 다양한 상품명 선택자 후보들 (우선순위 순)
-            product_name_selectors = [
-                # 1순위: 상품명 전용 클래스
-                '.product-name', '.product_name', '.goods-name', '.goods_name',
-                '.item-name', '.item_name', '.detail-title', '.product-title',
-                
-                # 2순위: 포괄적 상품명 패턴
-                '[class*="product"][class*="name"]', '[class*="goods"][class*="name"]',
-                '[class*="product"][class*="title"]', '[class*="goods"][class*="title"]',
-                
-                # 3순위: 일반적인 제목 요소 (단, 키드짐에서 문제가 된 .title 제외)
-                'h1', 'h2', 'h3', '.name', 
-                
-                # 4순위: 포괄적 패턴
-                '[class*="name"]:not(.title)', '[class*="title"]:not(.title)',
-                '[class*="product"]', '[class*="goods"]', '[class*="item"]',
-                
-                # 5순위: 기존 perfect_result 선택자 (문제가 있었지만 fallback으로)
-                self.selectors.get('상품명', '.title')
-            ]
-            
-            for selector in product_name_selectors:
+            # 상품명 (브랜드명 우선 선택)
+            if self.selectors.get('상품명'):
                 try:
-                    elements = await page.query_selector_all(selector)
-                    if not elements:
-                        continue
+                    # 모든 후보 요소 가져오기
+                    elements = await page.query_selector_all(self.selectors['상품명'])
                     
+                    # 브랜드명 대괄호가 있는 상품명 우선 선택
                     best_name = None
                     best_score = 0
                     
@@ -270,135 +245,37 @@ class FinalAnalyzer:
                             if text:
                                 text = text.strip()
                                 
-                                # 강화된 제외 패턴 체크
-                                # 강화된 제외 패턴 체크
+                                # 제외 패턴 체크
                                 exclude_patterns = [
-                                    # 키드짐 특화 UI 요소 패턴
-                                    '좋아요', '싫어요', '추천', '찜하기', '관심상품', '북마크', '즐겨찾기',
-                                    '리뷰', '후기', '평가', '별점', '댓글', '문의', '신고',
-                                    
-                                    # 키드짐 특화 카테고리/메뉴 패턴 (강화)
-                                    '볼&골대', '체육용품', '운동기구', '스포츠용품', '놀이기구',
-                                    '네트리더', '타겟게임', '라켓게임', '멀티시스템', 
-                                    '캐치게임', '점프&밸런스', '레크리에이션', '놀이교구',
-                                    '유아체육', '어린이체육', '유아놀이', '어린이놀이',
-                                    
-                                    # 범용 제외 패턴 (강화)
                                     '카테고리', '전체보기', '메뉴', '네비게이션', '로그인', '회원가입',
                                     '장바구니', '주문', '배송', '고객센터', '공지사항', '이벤트',
-                                    '검색', '정렬', '필터', '브랜드', '제조사', 'FAQ', 'Q&A',
-                                    '이용약관', '개인정보', '정책', '가이드', '도움말'
-                                    '신상품', '인기상품', '할인', '세일', '모델명', '제조사', '원산지',
-                                    'quick', 'menu', 'nav', 'header', 'footer', 'banner',
-                                    
-                                    # 짧은 UI 텍스트
-                                    '더보기', '닫기', '열기', '이전', '다음', '목록', '검색',
-                                    'more', 'close', 'open', 'prev', 'next', 'list', 'search'
+                                    '커뮤니티', '게시판', '문의', '리뷰', '소개', '브랜드',
+                                    '옵션', '후기', '상세정보', '문의사항', '상품 옵션', '상품 후기'
                                 ]
                                 
-                                # 제외 패턴 정확 매칭 및 포함 매칭
-                                should_exclude = False
-                                text_lower = text.lower()
-                                
-                                # 정확 매칭 (완전히 같은 경우)
-                                if text in exclude_patterns or text_lower in [p.lower() for p in exclude_patterns]:
-                                    should_exclude = True
-                                
-                                # 포함 매칭 (하지만 너무 짧은 텍스트만)
-                                elif len(text) <= 10 and any(pattern.lower() in text_lower for pattern in exclude_patterns):
-                                    should_exclude = True
-                                
+                                should_exclude = any(pattern in text for pattern in exclude_patterns)
                                 if should_exclude:
                                     continue
-                                
-                                # 길이 기반 1차 필터링 (상품명 합리적 범위)
-                                if not (5 <= len(text) <= 150):
-                                    continue
-                                
-                                # 점수 계산 (개선된 로직)
+                                    
+                                # 점수 계산
                                 score = 0
-                                
-                                # 길이 점수 (적당한 길이 선호)
-                                if 10 <= len(text) <= 80:
-                                    score += 20
-                                elif 5 <= len(text) <= 150:
+                                if 3 <= len(text) <= 100:
                                     score += 10
                                 
-                                # 클래스명 기반 점수 (상품명 전용 클래스 최우선)
-                                class_name = await element.get_attribute('class') or ''
-                                class_lower = class_name.lower()
-                                
-                                # 상품명 전용 클래스 초고점
-                                if any(pattern in class_lower for pattern in ['product-name', 'goods-name', 'item-name']):
-                                    score += 100
-                                elif any(pattern in class_lower for pattern in ['product-title', 'goods-title', 'detail-title']):
-                                    score += 80
-                                elif any(keyword in class_lower for keyword in ['product', 'goods', 'item']):
-                                    score += 40
-                                
-                                # 태그별 점수
-                                try:
-                                    tag_name = await element.evaluate('el => el.tagName.toLowerCase()')
-                                except:
-                                    tag_name = ''
-                                if tag_name == 'h1':
-                                    score += 30
-                                elif tag_name == 'h2':
-                                    score += 20
-                                elif tag_name == 'h3':
-                                    score += 10
-                                
-                                # 브랜드명 대괄호 점수 (키드짐 특화 및 범용성 강화)
-                                if '[키드짐]' in text or '[kidgym]' in text.lower():
-                                    score += 100  # 키드짐 브랜드명 최고점
-                                elif '[브랜드]' in text.lower() or '[제조사]' in text.lower():
-                                    score += 90   # 일반 브랜드명 고점
-                                elif '[' in text and ']' in text:
-                                    # 대괄호 내용이 일반적인 브랜드명인지 검증
-                                    bracket_content = text[text.find('[')+1:text.find(']')]
-                                    if len(bracket_content) >= 2 and bracket_content.replace(' ', '').isalnum():
-                                        score += 70  # 유효한 브랜드명으로 보이는 대괄호
-                                    else:
-                                        score += 20  # 브랜드명이 아닌 대괄호
-                                
-                                # UI 요소 및 카테고리 감점 강화
-                                if 'title' in class_lower:
-                                    if len(text) <= 10:  # "좋아요" 같은 짧은 title 요소
-                                        score -= 80
-                                    elif any(ui_word in text.lower() for ui_word in ['좋아요', '싫어요', '찜하기', '버튼']):
-                                        score -= 100  # UI 요소 확실
-                                
-                                # 카테고리명 강력 감점
-                                category_indicators = ['볼&골대', '체육용품', '운동기구', '카테고리']
-                                if any(cat in text for cat in category_indicators):
-                                    score -= 200  # 카테고리명 강력 배제
-                                
-                                # 버튼, 링크 요소 감점
-                                parent_tag = ''
-                                try:
-                                    parent = await element.evaluate('el => el.parentElement')
-                                    if parent:
-                                        parent_tag = await parent.evaluate('el => el.tagName.toLowerCase()')
-                                except:
-                                    pass
-                                
-                                if parent_tag in ['button', 'a']:
-                                    score -= 30
+                                # 브랜드명 대괄호 초고점!
+                                if '[' in text and ']' in text:
+                                    score += 50
+                                    
                                 if score > best_score:
                                     best_score = score
                                     best_name = text
                     
-                    # 유효한 상품명을 찾았으면 더 이상 다른 선택자 시도하지 않음
-                    if best_name and best_score >= 20:  # 최소 점수 기준
-                        product_name = best_name
-                        print(f"[SUCCESS] 상품명 추출 성공 (선택자: {selector}, 점수: {best_score}): {product_name[:50]}...")
-                        break
-                        
+                    data['상품명'] = best_name
+                    
                 except Exception as e:
-                    print(f"[DEBUG] 선택자 {selector} 시도 실패: {e}")
-                    continue
-            
-            data['상품명'] = product_name
+                    data['상품명'] = None
+            else:
+                data['상품명'] = None
             
             # 가격
             if self.selectors.get('가격'):
@@ -542,77 +419,6 @@ class FinalAnalyzer:
                     data['상세페이지'] = detail_images[:10]
                     print(f"[DEBUG] 최종 상세페이지 이미지: {len(data['상세페이지'])}개")
                     
-                    # 상세설명 텍스트 추출 (범용 로직)
-                    try:
-                        print("[DEBUG] 상세설명 텍스트 추출 시작")
-                        detail_text_content = []
-                        
-                        # 범용 텍스트 선택자들 (p, div, article 태그 우선)
-                        text_selectors_to_try = [
-                            self.selectors.get('상세설명텍스트', ''),
-                            '.goods_description p, .goods_description div',
-                            '.product-description p, .product-description div', 
-                            '.detail p, .detail div',
-                            '.content p, .content div',
-                            '.description p, .description div',
-                            '.product-detail p, .product-detail div',
-                            'article p, article div',
-                            '[class*="description"] p, [class*="description"] div',
-                            '[class*="detail"] p, [class*="detail"] div'
-                        ]
-                        
-                        for selector in text_selectors_to_try:
-                            if not selector.strip():
-                                continue
-                                
-                            try:
-                                print(f"[DEBUG] 텍스트 선택자 시도: {selector}")
-                                text_elements = await page.query_selector_all(selector)
-                                print(f"[DEBUG] 찾은 텍스트 요소 수: {len(text_elements)}")
-                                
-                                for element in text_elements:
-                                    # innerHTML 또는 textContent 추출
-                                    html_content = await element.inner_html()
-                                    text_content = await element.inner_text()
-                                    
-                                    # HTML 서식이 있는 경우 HTML 우선, 없으면 텍스트
-                                    if html_content and html_content.strip():
-                                        # 기본적인 HTML 태그 정제 (스크립트, 스타일 제거)
-                                        cleaned_html = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
-                                        cleaned_html = re.sub(r'<style.*?</style>', '', cleaned_html, flags=re.DOTALL)
-                                        
-                                        if len(cleaned_html.strip()) > 10:  # 의미있는 내용만
-                                            detail_text_content.append(cleaned_html.strip())
-                                            print(f"[DEBUG] 유효한 HTML 텍스트 추가: {len(cleaned_html)}자")
-                                    elif text_content and text_content.strip() and len(text_content.strip()) > 10:
-                                        detail_text_content.append(text_content.strip())
-                                        print(f"[DEBUG] 유효한 플레인 텍스트 추가: {len(text_content)}자")
-                                
-                                # 유효한 텍스트를 찾았으면 다음 선택자는 시도하지 않음
-                                if detail_text_content:
-                                    print(f"[DEBUG] {selector} 선택자로 {len(detail_text_content)}개 텍스트 블록 찾음")
-                                    break
-                                    
-                            except Exception as e:
-                                print(f"[DEBUG] {selector} 텍스트 선택자 오류: {e}")
-                                continue
-                        
-                        # 텍스트 통합 및 정제
-                        if detail_text_content:
-                            combined_text = '\n\n'.join(detail_text_content)
-                            # 최대 길이 제한 (5000자)
-                            if len(combined_text) > 5000:
-                                combined_text = combined_text[:5000] + '...'
-                            data['상세설명텍스트'] = combined_text
-                            print(f"[DEBUG] 최종 상세설명 텍스트: {len(combined_text)}자")
-                        else:
-                            data['상세설명텍스트'] = ""
-                            print("[DEBUG] 상세설명 텍스트를 찾을 수 없음")
-                            
-                    except Exception as e:
-                        print(f"[ERROR] 상세설명 텍스트 추출 실패: {e}")
-                        data['상세설명텍스트'] = ""
-                    
                 except Exception as e:
                     print(f"[ERROR] 상세페이지 추출 실패: {e}")
                     import traceback
@@ -679,13 +485,12 @@ class FinalAnalyzer:
             return urljoin(base_url, url)
         
     def _is_valid_detail_image(self, url):
-        """유효한 상세 이미지인지 판단 (URL 패턴 + 실제 이미지 크기 검증)"""
+        """유효한 상세 이미지인지 판단"""
         if not url:
             return False
         
         url_lower = url.lower()
         
-        # 1단계: URL 패턴 기반 필터링
         # 확실히 제외할 UI 요소들만 필터링
         exclude_patterns = [
             'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
@@ -722,104 +527,40 @@ class FinalAnalyzer:
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
         has_image_ext = any(ext in url_lower for ext in image_extensions)
         
-        # URL 패턴 필터링을 통과하지 못하면 바로 거부
-        if not (has_include or has_image_ext):
-            return False
-        
-        # 2단계: 실제 이미지 크기 검증
-        return self._check_image_dimensions(url)
+        return has_include or has_image_ext
     
-    def _check_image_dimensions(self, url):
-        """실제 이미지 크기를 확인하여 660px 이상인지 검증 (캐시 활용)"""
-        # 캐시 확인
-        with self.cache_lock:
-            if url in self.verified_images_cache:
-                return self.verified_images_cache[url][0]
+    def _save_result(self):
+        """결과 저장 (SmartDetector 정보 포함)"""
+        result = {
+            '선택자': self.selectors,
+            '추출데이터': self.test_data,
+            'SmartDetector정보': self.smart_detector.get_detection_info(),
+            '생성일시': datetime.now().isoformat()
+        }
         
-        result = self._verify_single_image_optimized(url)
+        filename = f"perfect_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
-        # 캐시에 저장
-        with self.cache_lock:
-            self.verified_images_cache[url] = (result, 0)
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
         
-        return result
-    
-    def _verify_single_image_optimized(self, url):
-        """단일 이미지 최적화된 검증"""
-        try:
-            # requests.Session을 사용한 HEAD 요청
-            head_response = self.session.head(url, timeout=10, allow_redirects=True)
-            
-            if head_response.status_code == 200:
-                content_length = head_response.headers.get('content-length')
-                if content_length:
-                    file_size = int(content_length)
-                    # 50KB 미만이면 제외
-                    if file_size < 50000:
-                        return False
-            
-            # 실제 이미지 다운로드하여 크기 확인
-            img_response = self.session.get(url, timeout=15)
-            img_response.raise_for_status()
-            img_data = img_response.content
-            
-            # 파일 크기 재확인
-            if len(img_data) < 50000:
-                return False
-            
-            # PIL로 이미지 크기 확인
-            img = Image.open(io.BytesIO(img_data))
-            width, height = img.size
-            
-            # 660px 이상 조건 확인
-            if width >= 660:
-                # 추가 품질 검증: 가로세로 비율 확인
-                aspect_ratio = width / height
-                
-                # 너무 긴 이미지 (10:1 비율 이상) 제외
-                if aspect_ratio > 10 or aspect_ratio < 0.1:
-                    return False
-                
-                # 너무 작은 정사각형 이미지 제외 (100x100 미만)
-                if width == height and width < 100:
-                    return False
-                
-                # 중복 이미지 검사 (해시값 기반)
-                img_hash = hashlib.md5(img_data).hexdigest()
-                if img_hash in self.image_hashes:
-                    return False
-                
-                # 모든 검증 통과 시 해시 저장 및 승인
-                self.image_hashes.add(img_hash)
-                return True
-            else:
-                return False
-                
-        except Exception as e:
-            return False
-    
-    def verify_images_parallel(self, urls):
-        """병렬로 여러 이미지 검증"""
-        if not urls:
-            return {}
-            
-        print(f"[PERF] FinalAnalyzer 병렬 이미지 검증 시작: {len(urls)}개")
+        print(f"[SAVE] 결과 저장: {filename}")
+        print("=" * 70)
+        print("[FINAL] 최종 결과:")
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_url = {executor.submit(self._check_image_dimensions, url): url for url in urls}
-            results = {}
+        # SmartDetector 정보 출력
+        detection_info = self.smart_detector.get_detection_info()
+        if detection_info['detected_stage']:
+            print(f"   [AI] 탐지방식: {detection_info['detected_stage']}")
+        else:
+            print(f"   [AI] 탐지방식: 기본 선택자 사용")
             
-            for future in future_to_url:
-                url = future_to_url[future]
-                try:
-                    results[url] = future.result()
-                except Exception as e:
-                    print(f"[ERROR] 병렬 이미지 검증 실패 {url}: {e}")
-                    results[url] = False
-        
-        valid_count = sum(1 for is_valid in results.values() if is_valid)
-        print(f"[PERF] FinalAnalyzer 병렬 검증 완료: {valid_count}개 유효")
-        return results
+        print(f"   [COUNT] 선택자 개수: {len(self.selectors)}개")
+        print(f"   [NAME] 상품명: {self.selectors.get('상품명', 'FAIL')}")
+        print(f"   [PRICE] 가격: {self.selectors.get('가격', 'FAIL')}")
+        print(f"   [OPTIONS] 선택옵션: {self.selectors.get('선택옵션', 'FAIL')}")
+        print(f"   [THUMB] 썸네일: {self.selectors.get('썸네일', 'FAIL')}")
+        print(f"   [DETAIL] 상세페이지: {self.selectors.get('상세페이지', 'FAIL')}")
+        print(f"   [DATA] 추출된 상품: {len(self.test_data)}개")
     
     async def _debug_html_structure(self, page, debug_mode=False):
         """실시간 HTML 구조 분석 디버깅 기능"""
@@ -1060,44 +801,6 @@ class FinalAnalyzer:
                 
         except Exception as e:
             print(f"[DEBUG ERROR] 이미지 분석 실패: {e}")
-    
-    def _save_result(self):
-        """결과 저장 (SmartDetector 정보 포함)"""
-        result = {
-            '선택자': self.selectors,
-            '추출데이터': self.test_data,
-            'SmartDetector정보': self.smart_detector.get_detection_info(),
-            '생성일시': datetime.now().isoformat()
-        }
-        
-        filename = f"perfect_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        
-        print(f"[SAVE] 결과 저장: {filename}")
-        print("=" * 70)
-        print("[FINAL] 최종 결과:")
-        
-        # SmartDetector 정보 출력
-        detection_info = self.smart_detector.get_detection_info()
-        if detection_info['detected_stage']:
-            print(f"   [AI] 탐지방식: {detection_info['detected_stage']}")
-        else:
-            print(f"   [AI] 탐지방식: 기본 선택자 사용")
-            
-        print(f"   [COUNT] 선택자 개수: {len(self.selectors)}개")
-        print(f"   [NAME] 상품명: {self.selectors.get('상품명', 'FAIL')}")
-        print(f"   [PRICE] 가격: {self.selectors.get('가격', 'FAIL')}")
-        print(f"   [OPTIONS] 선택옵션: {self.selectors.get('선택옵션', 'FAIL')}")
-        print(f"   [THUMB] 썸네일: {self.selectors.get('썸네일', 'FAIL')}")
-        print(f"   [DETAIL] 상세페이지: {self.selectors.get('상세페이지', 'FAIL')}")
-        print(f"   [DATA] 추출된 상품: {len(self.test_data)}개")
-    
-    def close(self):
-        """세션 정리"""
-        self.session.close()
-        print("[PERF] FinalAnalyzer 세션 정리 완료")
 
 
 if __name__ == "__main__":

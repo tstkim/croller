@@ -105,6 +105,7 @@ class ImageDownloadOptimizer:
     def close(self):
         """세션 정리"""
         self.session.close()
+        print("[PERF] ImageDownloadOptimizer 세션 정리 완료")
 
 def is_valid_option(text):
     """유효한 선택옵션인지 판단"""
@@ -286,7 +287,6 @@ with sync_playwright() as p:
                 product_list_selector = selectors.get("상품리스트")
                 print(f"[DEBUG] 사용할 상품리스트 선택자: {product_list_selector}")
                 
-                # perfect_result의 선택자로 상품 찾기
                 # perfect_result의 선택자로 상품 찾기
                 try:
                     product_list = soup.select(product_list_selector)
@@ -617,66 +617,64 @@ with sync_playwright() as p:
                         if thumbnail_url:
                             print(f"[DEBUG] 썸네일 이미지 다운로드 시도: {thumbnail_url}")
                             temp_filename = f'{thumbnail_path}/{image_counter}_temp.jpg'
-                            
-                            # 최적화된 다운로드 사용
-                            if download_optimizer.download_image_optimized(thumbnail_url, temp_filename):
-                                im = Image.open(temp_filename)
-                                im = im.resize((400, 400))
-                                image = Image.new("RGB", (600, 600), "white")
-                                gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
-                                image.paste(gray_background, (0, 500))
-                                # 먼저 상품 이미지를 붙임
-                                image.paste(im, (100, 100))
-                                # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
-                                blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
-                                image.paste(blue_background, (480, 0))
-                                red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
-                                image.paste(red_badge, (480, 80))
-                                draw = ImageDraw.Draw(image)
-                                font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
-                                max_text_width = 520
-                                max_font_size = 150
-                                min_font_size = 30
-                                max_length = 13
-                                if len(product_name) > max_length:
-                                    text1 = product_name[:max_length] + "..."
-                                else:
-                                    text1 = product_name
-                                text1 = text1.replace("-", "")
+                            urllib.request.urlretrieve(thumbnail_url, temp_filename)
+                            im = Image.open(temp_filename)
+                            im = im.resize((400, 400))
+                            image = Image.new("RGB", (600, 600), "white")
+                            gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
+                            image.paste(gray_background, (0, 500))
+                            # 먼저 상품 이미지를 붙임
+                            image.paste(im, (100, 100))
+                            # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
+                            blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
+                            image.paste(blue_background, (480, 0))
+                            red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
+                            image.paste(red_badge, (480, 80))
+                            draw = ImageDraw.Draw(image)
+                            font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
+                            max_text_width = 520
+                            max_font_size = 150
+                            min_font_size = 30
+                            max_length = 13
+                            if len(product_name) > max_length:
+                                text1 = product_name[:max_length] + "..."
+                            else:
+                                text1 = product_name
+                            text1 = text1.replace("-", "")
+                            try:
+                                name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
                                 try:
-                                    name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
-                                    try:
-                                        bbox = draw.textbbox((0, 0), text1, font=name_font)
-                                        text_width = bbox[2] - bbox[0]
-                                        text_height = bbox[3] - bbox[1]
-                                    except AttributeError:
-                                        text_width, text_height = draw.textsize(text1, font=name_font)
-                                    x = (600 - text_width) // 2
-                                    y = 500 + (100 - text_height) // 2
-                                    print(f"[DEBUG] 폰트 적용 성공: {name_font.size}pt, 텍스트폭: {text_width}, x좌표: {x}")
-                                except Exception as e:
-                                    print(f"[ERROR] 폰트 적용 오류: {e}")
-                                    name_font = ImageFont.truetype(font_path, min_font_size)
-                                    x = 10
-                                    y = 510
+                                    bbox = draw.textbbox((0, 0), text1, font=name_font)
+                                    text_width = bbox[2] - bbox[0]
+                                    text_height = bbox[3] - bbox[1]
+                                except AttributeError:
+                                    text_width, text_height = draw.textsize(text1, font=name_font)
+                                x = (600 - text_width) // 2
+                                y = 500 + (100 - text_height) // 2
+                                print(f"[DEBUG] 폰트 적용 성공: {name_font.size}pt, 텍스트폭: {text_width}, x좌표: {x}")
+                            except Exception as e:
+                                print(f"[ERROR] 폰트 적용 오류: {e}")
+                                name_font = ImageFont.truetype(font_path, min_font_size)
+                                x = 10
+                                y = 510
+                            try:
+                                draw.text((x, y), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
+                                print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
+                            except Exception as e:
+                                print(f"[ERROR] draw.text 오류: {e}")
+                            badge_font_path = "C:/Windows/Fonts/arialbd.ttf"
+                            try:
+                                s2b_font = ImageFont.truetype(badge_font_path, 60)
+                                registered_font = ImageFont.truetype(badge_font_path, 16)
+                            except:
                                 try:
-                                    draw.text((x, y), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
-                                    print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
-                                except Exception as e:
-                                    print(f"[ERROR] draw.text 오류: {e}")
-                                badge_font_path = "C:/Windows/Fonts/arialbd.ttf"
-                                try:
+                                    badge_font_path = "C:/Windows/Fonts/Arial.ttf"
                                     s2b_font = ImageFont.truetype(badge_font_path, 60)
                                     registered_font = ImageFont.truetype(badge_font_path, 16)
                                 except:
-                                    try:
-                                        badge_font_path = "C:/Windows/Fonts/Arial.ttf"
-                                        s2b_font = ImageFont.truetype(badge_font_path, 60)
-                                        registered_font = ImageFont.truetype(badge_font_path, 16)
-                                    except:
-                                        s2b_font = ImageFont.load_default()
-                                        registered_font = ImageFont.load_default()
-                                s2b_text = "S2B"
+                                    s2b_font = ImageFont.load_default()
+                                    registered_font = ImageFont.load_default()
+                            s2b_text = "S2B"
                             try:
                                 bbox = draw.textbbox((0, 0), s2b_text, font=s2b_font)
                                 s2b_width = bbox[2] - bbox[0]
@@ -724,6 +722,7 @@ with sync_playwright() as p:
                             page.wait_for_timeout(500)
 
                         # 2. 다층 상세페이지 선택자 전략으로 img 태그 추출
+                        img_elements = page.query_selector_all('img')
                         # 썸네일 URL robust하게 추출
                         thumbnail_element = product_soup.select_one(selectors["썸네일"])
                         thumbnail_url = None
@@ -735,105 +734,17 @@ with sync_playwright() as p:
                         # 유효성 검사 함수 (final_analyzer_universal.py의 로직 활용)
                         analyzer = FinalAnalyzer()
                         detail_img_urls = []
-                        
-                        # 다층 선택자 전략: 우선순위별로 순차 시도
-                        detail_selectors = [
-                            # 1순위: perfect_result 기본 선택자
-                            selectors.get("상세페이지", "#prdDetail img"),
-                            # 2순위: 키드짐 특화 선택자들
-                            "#prdDetailContentLazy img", "#prdDetailContent img",
-                            '.goods_description img', '.product-description img',
-                            # 3순위: 업로드 패턴 기반 선택자들
-                            'img[src*="upload"]', 'img[src*="editor"]', 'img[src*="content"]',
-                            # 4순위: 범용 선택자들
-                            '.product-detail img', '.prd_detail img', '.product_detail img',
-                            '.detail img', '.content img', '#productDetail img',
-                            # 5순위: 최후의 수단
-                            'img'
-                        ]
-                        
-                        selected_images = []
-                        for i, selector in enumerate(detail_selectors, 1):
-                            try:
-                                img_elements = page.query_selector_all(selector)
-                                if img_elements:
-                                    print(f"[FALLBACK] 선택자 {i}/{len(detail_selectors)} 성공: '{selector}' -> {len(img_elements)}개 이미지")
-                                    selected_images = img_elements
-                                    break
-                                else:
-                                    print(f"[DEBUG] 선택자 {i}/{len(detail_selectors)} 실패: '{selector}' -> 0개 이미지")
-                            except Exception as e:
-                                print(f"[DEBUG] 선택자 {i}/{len(detail_selectors)} 오류: '{selector}' -> {e}")
+                        for img in img_elements:
+                            img_url = img.get_attribute('data-original') or img.get_attribute('data-src') or img.get_attribute('src')
+                            if not img_url:
                                 continue
-                        
-                        if not selected_images:
-                            print("[ERROR] 모든 상세페이지 선택자 실패")
-                            raise Exception("상세페이지 이미지 선택자 탐지 실패")
-                            
-                        print(f"[DEBUG] Playwright 실시간 이미지 크기 검증 시작: {len(selected_images)}개 이미지")
-                        
-                        # Playwright로 이미지 크기 사전 검증 (다운로드 전) - 성공한 선택자 사용
-                        successful_selector = None
-                        for i, selector in enumerate(detail_selectors, 1):
-                            try:
-                                test_elements = page.query_selector_all(selector)
-                                if test_elements:
-                                    successful_selector = selector
-                                    break
-                            except:
-                                continue
-                        
-                        if not successful_selector:
-                            successful_selector = 'img'  # 기본값
-                            
-                        valid_img_data = page.evaluate(f"""
-                            () => {{
-                                const images = document.querySelectorAll('{successful_selector}');
-                                const validImages = [];
-                                
-                                for (let img of images) {{
-                                    // naturalWidth/naturalHeight로 실제 이미지 크기 확인
-                                    if (img.naturalWidth >= 660) {{
-                                        const imgUrl = img.getAttribute('data-original') || 
-                                                     img.getAttribute('data-src') || 
-                                                     img.getAttribute('src');
-                                        if (imgUrl) {{
-                                            validImages.push({{
-                                                url: imgUrl,
-                                                width: img.naturalWidth,
-                                                height: img.naturalHeight,
-                                                aspectRatio: img.naturalWidth / img.naturalHeight
-                                            }});
-                                        }}
-                                    }}
-                                }}
-                                
-                                return validImages;
-                            }}
-                        """)
-                        
-                        print(f"[DEBUG] Playwright 크기 검증 완료: {len(valid_img_data)}개 이미지가 660px 이상")
-                        
-                        # 사전 검증된 이미지들을 FinalAnalyzer로 2차 검증
-                        for img_data in valid_img_data:
-                            img_url = urljoin(product_base_url, img_data['url'])
-                            width = img_data['width']
-                            height = img_data['height']
-                            aspect_ratio = img_data['aspectRatio']
-                            
-                            print(f"[DEBUG] 사전 검증 통과 이미지: {width}x{height} (ratio: {aspect_ratio:.2f})")
-                            
-                            # FinalAnalyzer로 2차 검증 (워터마크, 중복 등)
+                            img_url = urljoin(product_base_url, img_url)
+                            # 유효성 검사, 썸네일/중복 방지, 최대 10개
                             if (analyzer._is_valid_detail_image(img_url)
                                 and img_url not in detail_img_urls
                                 and (not thumbnail_url or img_url != thumbnail_url)):
                                 detail_img_urls.append(img_url)
-                                print(f"[DEBUG] 최종 승인 이미지: {width}x{height}, URL: {img_url}")
-                            else:
-                                print(f"[DEBUG] FinalAnalyzer에서 거부된 이미지: {img_url}")
-                            
                             if len(detail_img_urls) >= 10:
-                                print(f"[DEBUG] 최대 10개 이미지 달성, 중단")
                                 break
                         if detail_img_urls:
                             logging.info(f"상세페이지 추출 성공: {len(detail_img_urls)}개")
@@ -1193,7 +1104,6 @@ with sync_playwright() as p:
                         logging.error(f"상품 데이터 추가 중 오류 발생: {e}")
                         continue
 
-  
             except Exception as e:
                 logging.error(f"페이지 처리 중 오류 발생: {e}")
                 continue

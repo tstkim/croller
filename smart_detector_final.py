@@ -201,22 +201,22 @@ class SmartDetector:
                                     score += 50  # 다른 모든 후보를 압도
                                     print(f"[DEBUG] -> 브랜드명 대괄호 발견! +50점")
                                     
-                                    # UI 요소 및 카테고리명 추가 감점 (제외 패턴을 빠져나간 경우)
-                                    ui_indicators = ['좋아요', '싫어요', '찜하기', '버튼', '클릭', '선택']
-                                    if any(ui_word in text_lower for ui_word in ui_indicators):
-                                        score -= 100  # UI 요소 강력 배제
-                                        print(f"[DEBUG] -> UI 요소 감점 -100점")
+                                # UI 요소 및 카테고리명 추가 감점 (제외 패턴을 빠져나간 경우)
+                                ui_indicators = ['좋아요', '싫어요', '찜하기', '버튼', '클릭', '선택']
+                                if any(ui_word in text_lower for ui_word in ui_indicators):
+                                    score -= 100  # UI 요소 강력 배제
+                                    print(f"[DEBUG] -> UI 요소 감점 -100점")
                                     
-                                    category_indicators = ['볼&골대', '네트리더', '타겟게임', '체육용품', '운동기구']
-                                    if any(cat in text for cat in category_indicators):
-                                        score -= 200  # 카테고리명 강력 배제
-                                        print(f"[DEBUG] -> 카테고리명 감점 -200점")
+                                category_indicators = ['볼&골대', '네트리더', '타겟게임', '체육용품', '운동기구']
+                                if any(cat in text for cat in category_indicators):
+                                    score -= 200  # 카테고리명 강력 배제
+                                    print(f"[DEBUG] -> 카테고리명 감점 -200점")
                                     
                                 # 상품 관련 키워드 보너스
                                 product_keywords = ['가방', '신발', '의류', '장난감', '어린이', '아이', '배낭', '유모차']
                                 if any(word in text for word in product_keywords):
                                     score += 10
-                                
+                                    
                                 # 제네릭 헤더 태그 페널티 (카테고리명을 잘못 선택하는 것을 방지)
                                 generic_header_selectors = ['h1', 'h2', 'h3', 'h4', 'h5']
                                 if selector in generic_header_selectors:

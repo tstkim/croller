@@ -20,8 +20,17 @@ class ImageDownloadOptimizer:
     
     def __init__(self, max_workers=4, timeout=15):
         self.session = requests.Session()
+        # 키드짐 사이트에 맞는 헤더 설정
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://kidgymb2b.co.kr/',
+            'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'image',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Site': 'same-origin'
         })
         self.max_workers = max_workers
         self.timeout = timeout
@@ -535,39 +544,58 @@ with sync_playwright() as p:
                         print(f"[ERROR] 상품 페이지 이동 중 오류: {e}")
                         continue
 
-                    # 상품명 추출 (개별 상품 페이지에서)
+                    # 상품명 추출 (개별 상품 페이지에서) - og:title 우선 사용
                     product_name = "상품명을 찾을 수 없습니다."
                     try:
-                        # perfect_result의 선택자로 모든 후보 요소 가져오기
-                        name_elements = product_soup.select(selectors["상품명"])
-                        if name_elements:
-                            # 브랜드명 대괄호가 있는 상품명 우선 선택
-                            best_name = None
-                            for element in name_elements:
-                                text = element.get_text(strip=True)
-                                if text:
-                                    # 제외 패턴 체크
-                                    exclude_patterns = [
-                                        '카테고리', '전체보기', '메뉴', '로그인', '회원가입',
-                                        '장바구니', '주문', '배송', '고객센터'
-                                    ]
-                                    if any(pattern in text for pattern in exclude_patterns):
-                                        continue
-                                    
-                                    # 브랜드명 대괄호가 있으면 우선 선택
-                                    if '[' in text and ']' in text:
-                                        best_name = text
-                                        break
-                                    elif not best_name:  # 브랜드명이 없으면 첫 번째 유효한 텍스트 사용
-                                        best_name = text
-                            
-                            if best_name:
-                                product_name = best_name.split(":", 1)[-1].strip()
-                                print(f"[PRODUCT] {product_name[:50]}...")
+                        # 1. 먼저 og:title 메타태그에서 상품명 추출 시도
+                        og_title_element = product_soup.select_one('meta[property="og:title"]')
+                        if og_title_element and og_title_element.get('content'):
+                            og_title = og_title_element.get('content').strip()
+                            print(f"[DEBUG] og:title 메타태그에서 상품명 발견: '{og_title}'")
+                            # og:title에서 추출한 상품명이 유효한지 확인
+                            if og_title and len(og_title) > 2 and not any(exclude in og_title for exclude in ['카테고리', '전체보기', '메뉴', '로그인', '볼&골대', '볼&체커']):
+                                product_name = og_title
+                                print(f"[SUCCESS] og:title에서 상품명 추출 성공: '{product_name}'")
                             else:
-                                print("[WARNING] 유효한 상품명을 찾을 수 없음")
-                        else:
-                            print(f"[WARNING] 선택자 '{selectors['상품명']}'로 상품명을 찾을 수 없음")
+                                print(f"[WARNING] og:title 내용이 유효하지 않음: '{og_title}'")
+                        
+                        # 2. og:title에서 추출 실패 시 기존 선택자 방식 사용
+                        if product_name == "상품명을 찾을 수 없습니다.":
+                            print(f"[FALLBACK] og:title 추출 실패, 기존 선택자 방식 사용")
+                            # perfect_result의 선택자로 모든 후보 요소 가져오기
+                            name_elements = product_soup.select(selectors["상품명"])
+                            print(f"[DEBUG] 상품명 선택자 '{selectors['상품명']}'로 {len(name_elements)}개 요소 발견")
+                            if name_elements:
+                                # 브랜드명 대괄호가 있는 상품명 우선 선택
+                                best_name = None
+                                for element in name_elements:
+                                    text = element.get_text(strip=True)
+                                    print(f"[DEBUG] 선택된 요소 텍스트: '{text}' (tag: {element.name}, class: {element.get('class', 'None')})")
+                                    if text:
+                                        # 제외 패턴 체크
+                                        exclude_patterns = [
+                                            '카테고리', '전체보기', '메뉴', '로그인', '회원가입',
+                                            '장바구니', '마이페이지', '고객센터', '공지사항', '이벤트',
+                                            '볼&골대', '볼&체커', '네트워크', '타임스탬프', '멀티스포츠',
+                                            '표현활동', '게임활동', 'nav', 'menu', 'button', 'btn'
+                                        ]
+                                        if any(pattern in text for pattern in exclude_patterns):
+                                            continue
+                                        
+                                        # 브랜드명 대괄호가 있으면 우선 선택
+                                        if '[' in text and ']' in text:
+                                            best_name = text
+                                            break
+                                        elif not best_name:  # 브랜드명이 없으면 첫 번째 유효한 텍스트 사용
+                                            best_name = text
+                                if best_name:
+                                    product_name = best_name.split(":", 1)[-1].strip()
+                                    print(f"[DEBUG] 최종 선택된 상품명: '{product_name}' (from: '{best_name}')")
+                                    print(f"[PRODUCT] {product_name[:50]}...")
+                                else:
+                                    print("[WARNING] 유효한 상품명을 찾을 수 없음")
+                            else:
+                                print(f"[WARNING] 선택자 '{selectors['상품명']}'로 상품명을 찾을 수 없음")
                     except Exception as e:
                         logging.error(f"[ERROR] 상품명 추출 중 오류 발생: 선택자 '{selectors['상품명']}' 사용 시 오류 {e}, 후속조치: 기본값으로 설정")
                         print(f"[ERROR] 상품명 추출 중 오류: {e}")

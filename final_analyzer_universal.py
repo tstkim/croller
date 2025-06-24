@@ -186,6 +186,9 @@ class FinalAnalyzer:
         successful_count = 0
         max_attempts = min(len(test_links), 10)
         
+        # 중복 상품명 방지를 위한 집합 추가
+        seen_names = set()
+        
         for i in range(max_attempts):
             if successful_count >= TEST_PRODUCTS:
                 print(f"[COMPLETE] 목표 달성! {TEST_PRODUCTS}개 상품 추출 완료")
@@ -200,15 +203,38 @@ class FinalAnalyzer:
                 data = await self._extract_single_product(page, link)
                 
                 if data and data.get('상품명', '').strip():
-                    self.test_data.append(data)
-                    successful_count += 1
+                    # 상품명 정제 및 유효성 검증
+                    product_name = data.get('상품명', '').strip().lower()
                     
-                    print(f"[SUCCESS] 상품 {i+1} 성공! ({successful_count}/{TEST_PRODUCTS})")
-                    print(f"   [NAME] 상품명: {data.get('상품명', '')[:50]}...")
-                    print(f"   [PRICE] 가격: {data.get('가격', 'N/A')}")
-                    print(f"   [OPTIONS] 옵션: {len(data.get('선택옵션', []))}개")
-                    print(f"   [THUMB] 썸네일: {'OK' if data.get('썸네일') else 'FAIL'}")
-                    print(f"   [DETAIL] 상세이미지: {len(data.get('상세페이지', []))}개")
+                    # 키드짐 특화 카테고리명 및 무효한 상품명 제외
+                    invalid_names = {
+                        '볼&골대', '댄스&창', '댄스&소셜', '네트게임', '타겟게임',
+                        '흔바테감', '네트리더', '게임도구', '음향기기', '무대배경',
+                        '교구', '체육용품', '놀이기구', '무대도구', '카테고리',
+                        '상품명을 찾을 수 없습니다.', '상품명 정보 없음', '좋아요',
+                        '찜하기', '장바구니', '바로구매', '관심상품'
+                    }
+                    
+                    # 정제된 상품명이 무효한 이름인지 확인
+                    is_invalid = any(invalid.lower() == product_name for invalid in invalid_names)
+                    
+                    # 중복 및 유효성 검사
+                    if not is_invalid and product_name not in seen_names:
+                        seen_names.add(product_name)
+                        self.test_data.append(data)
+                        successful_count += 1
+                        
+                        print(f"[SUCCESS] 상품 {i+1} 성공! ({successful_count}/{TEST_PRODUCTS})")
+                        print(f"   [NAME] 상품명: {data.get('상품명', '')[:50]}...")
+                        print(f"   [PRICE] 가격: {data.get('가격', 'N/A')}")
+                        print(f"   [OPTIONS] 옵션: {len(data.get('선택옵션', []))}개")
+                        print(f"   [THUMB] 썸네일: {'OK' if data.get('썸네일') else 'FAIL'}")
+                        print(f"   [DETAIL] 상세이미지: {len(data.get('상세페이지', []))}개")
+                    else:
+                        if is_invalid:
+                            print(f"[SKIP] 상품 {i+1} 무효한 상품명: {data.get('상품명', '')[:50]}...")
+                        else:
+                            print(f"[SKIP] 상품 {i+1} 중복된 상품명: {data.get('상품명', '')[:50]}...")
                 else:
                     print(f"[FAIL] 상품 {i+1} 실패: 데이터 부족")
                     
@@ -219,7 +245,7 @@ class FinalAnalyzer:
             if i < max_attempts - 1:
                 await asyncio.sleep(1)
         
-        print(f"[RESULT] 추출 완료: {successful_count}개 성공")
+        print(f"[RESULT] 추출 완료: {successful_count}개 성공, 중복 제외: {len(seen_names)}개 고유 상품명")
     
     async def _extract_single_product(self, page, url):
         """단일 상품 데이터 추출"""
@@ -229,8 +255,55 @@ class FinalAnalyzer:
             
             data = {'url': url}
             
-            # 상품명 (브랜드명 우선 선택)
-            if self.selectors.get('상품명'):
+            # 상품명 (메타태그 우선 + Fallback 적용)
+            product_name = None
+            extraction_method = "추출 실패"
+            
+            # 1차 시도: 메타 태그에서 상품명 추출 (키드짐 분석 결과 반영)
+            try:
+                # og:title 메타 태그 확인
+                og_title = await page.query_selector('meta[property="og:title"]')
+                if og_title:
+                    meta_title = await og_title.get_attribute('content')
+                    if meta_title and meta_title.strip():
+                        # 브랜드명 제거 (예: "크리스마스무대 - 키드짐-스마타임" -> "크리스마스무대")
+                        clean_title = meta_title.strip().split(' - ')[0].strip()
+                        
+                        # 키드짐 카테고리명 제외 확인
+                        kidgym_categories = [
+                            '볼&골대', '댄스&창', '댄스&소셜', '네트게임', '타겟게임',
+                            '흔바테감', '네트리더', '게임도구', '음향기기', '무대배경',
+                            '교구', '체육용품', '놀이기구', '무대도구'
+                        ]
+                        
+                        is_category = any(cat.lower() == clean_title.lower() for cat in kidgym_categories)
+                        
+                        if not is_category and len(clean_title) > 2:
+                            product_name = clean_title
+                            extraction_method = "og:title 메타태그"
+                            print(f"[META] og:title에서 상품명 추출 성공: {product_name}")
+                        else:
+                            print(f"[META] og:title 카테고리명 제외: {clean_title}")
+                
+                # 페이지 title 태그 확인 (og:title이 없을 경우)
+                if not product_name:
+                    title_elem = await page.query_selector('title')
+                    if title_elem:
+                        title_text = await title_elem.text_content()
+                        if title_text and title_text.strip():
+                            clean_title = title_text.strip().split(' - ')[0].strip()
+                            is_category = any(cat.lower() == clean_title.lower() for cat in kidgym_categories)
+                            
+                            if not is_category and len(clean_title) > 2:
+                                product_name = clean_title
+                                extraction_method = "페이지 title 태그"
+                                print(f"[META] title에서 상품명 추출 성공: {product_name}")
+                                
+            except Exception as e:
+                print(f"[META] 메타태그 추출 오류: {e}")
+            
+            # 2차 시도: 기존 선택자 방식 (Fallback)
+            if not product_name and self.selectors.get('상품명'):
                 try:
                     # 모든 후보 요소 가져오기
                     elements = await page.query_selector_all(self.selectors['상품명'])
@@ -245,12 +318,18 @@ class FinalAnalyzer:
                             if text:
                                 text = text.strip()
                                 
-                                # 제외 패턴 체크
+                                # 제외 패턴 체크 (키드짐 특화 강화)
                                 exclude_patterns = [
                                     '카테고리', '전체보기', '메뉴', '네비게이션', '로그인', '회원가입',
                                     '장바구니', '주문', '배송', '고객센터', '공지사항', '이벤트',
                                     '커뮤니티', '게시판', '문의', '리뷰', '소개', '브랜드',
-                                    '옵션', '후기', '상세정보', '문의사항', '상품 옵션', '상품 후기'
+                                    '옵션', '후기', '상세정보', '문의사항', '상품 옵션', '상품 후기',
+                                    # 키드짐 카테고리명 추가
+                                    '볼&골대', '댄스&창', '댄스&소셜', '네트게임', '타겟게임',
+                                    '흔바테감', '네트리더', '게임도구', '음향기기', '무대배경',
+                                    '교구', '체육용품', '놀이기구', '무대도구',
+                                    # UI 요소
+                                    '좋아요', '찜하기', '장바구니에 넣기', '바로구매'
                                 ]
                                 
                                 should_exclude = any(pattern in text for pattern in exclude_patterns)
@@ -270,12 +349,21 @@ class FinalAnalyzer:
                                     best_score = score
                                     best_name = text
                     
-                    data['상품명'] = best_name
-                    
+                    if best_name:
+                        product_name = best_name
+                        extraction_method = "perfect_result 선택자"
+                        print(f"[FALLBACK] 선택자에서 상품명 추출: {product_name}")
+                        
                 except Exception as e:
-                    data['상품명'] = None
+                    print(f"[FALLBACK] 선택자 추출 오류: {e}")
+            
+            # 최종 상품명 설정
+            data['상품명'] = product_name
+            
+            if product_name:
+                print(f"[SUCCESS] 상품명 추출 성공 ({extraction_method}): {product_name[:30]}...")
             else:
-                data['상품명'] = None
+                print(f"[FAIL] 상품명 추출 실패")
             
             # 가격
             if self.selectors.get('가격'):
@@ -485,13 +573,13 @@ class FinalAnalyzer:
             return urljoin(base_url, url)
         
     def _is_valid_detail_image(self, url):
-        """유효한 상세 이미지인지 판단"""
+        """기준서에 따른 유효한 상세 이미지 검증 (가로 660px 이상, 파일 크기, 의미 필터링)"""
         if not url:
             return False
         
         url_lower = url.lower()
         
-        # 확실히 제외할 UI 요소들만 필터링
+        # 1단계: URL 패턴 기반 필터링 (확실히 제외할 UI 요소들)
         exclude_patterns = [
             'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
             'arrow', 'quick', 'zzim', 'wishlist',
@@ -505,29 +593,111 @@ class FinalAnalyzer:
             # 키드짐 특화 워터마크 및 UI 요소 필터링
             'watermark', 'watermark3', 'sold_out', 'stamp',
             '0516100/', 'overlay', 'badge', 'mark',
-            'thumbnail_', '_thumb', 'list_', '_list'
+            'thumbnail_', '_thumb', 'list_', '_list',
+            # 기준서 추가: 무의미한 이미지 패턴
+            'guide_', 'info_', 'notice_', 'help_',
+            'event_', 'promotion_', 'ad_', 'banner_'
         ]
         
         # 특정 패턴이 포함된 경우 무조건 제외
         for pattern in exclude_patterns:
             if pattern in url_lower:
-                # print(f"[DEBUG] '{pattern}' 패턴 발견, 이미지 제외: {url}")  # 디버깅 메시지 주석처리
+                print(f"[FILTER] 패턴 '{pattern}' 발견으로 이미지 제외: {url}")
                 return False
         
-        # 포함되어야 하는 패턴들 (상세 이미지 가능성 높음)
-        include_patterns = [
-            'detail', 'content', 'description', 'product',
-            'item', 'goods', 'view', 'main', 'sub'
-        ]
-        
-        # 상세 패턴이 포함되어 있으면 대부분 허용
-        has_include = any(pattern in url_lower for pattern in include_patterns)
-        
-        # 이미지 확장자가 있으면 대부분 허용
+        # 2단계: 이미지 파일 형식 확인
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
         has_image_ext = any(ext in url_lower for ext in image_extensions)
+        if not has_image_ext:
+            print(f"[FILTER] 이미지 확장자 없음으로 제외: {url}")
+            return False
         
-        return has_include or has_image_ext
+        # 3단계: 실제 이미지 다운로드 및 해상도/크기 검증 (기준서 요구사항)
+        try:
+            import requests
+            from PIL import Image
+            from io import BytesIO
+            
+            # 키드짐 사이트에 맞는 헤더 설정 (main.py ImageDownloadOptimizer와 동일)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://kidgymb2b.co.kr/',
+                'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'same-origin'
+            }
+            
+            # 이미지 헤더만 다운로드하여 크기 확인 (성능 최적화)
+            response = requests.head(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                print(f"[FILTER] HTTP 응답 오류 ({response.status_code})으로 이미지 제외: {url}")
+                return False
+            
+            # 파일 크기 검증 (기준서: 파일 크기 필터링)
+            content_length = response.headers.get('content-length')
+            if content_length:
+                file_size = int(content_length)
+                # 너무 작은 파일 (10KB 미만) 제외
+                if file_size < 10240:  # 10KB
+                    print(f"[FILTER] 파일 크기 너무 작음 ({file_size} bytes)으로 이미지 제외: {url}")
+                    return False
+                # 너무 큰 파일 (10MB 초과) 제외
+                if file_size > 10485760:  # 10MB
+                    print(f"[FILTER] 파일 크기 너무 큼 ({file_size} bytes)으로 이미지 제외: {url}")
+                    return False
+            
+            # 해상도 검증을 위해 실제 이미지 일부 다운로드 (기준서: 가로 660px 이상)
+            # 키드짐 사이트에 맞는 헤더 설정 (main.py ImageDownloadOptimizer와 동일)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://kidgymb2b.co.kr/',
+                'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'same-origin'
+            }
+            response = requests.get(url, headers=headers, timeout=15, stream=True)
+            if response.status_code != 200:
+                print(f"[FILTER] 이미지 다운로드 실패로 제외: {url}")
+                return False
+            
+            # 이미지 해상도 확인
+            try:
+                image_data = BytesIO()
+                downloaded = 0
+                # 최대 100KB만 다운로드해서 해상도 확인 (성능 최적화)
+                for chunk in response.iter_content(chunk_size=8192):
+                    if downloaded > 102400:  # 100KB 제한
+                        break
+                    image_data.write(chunk)
+                    downloaded += len(chunk)
+                
+                image_data.seek(0)
+                with Image.open(image_data) as img:
+                    width, height = img.size
+                    
+                    # 기준서 요구사항: 가로 해상도 660px 이상
+                    if width < 660:
+                        print(f"[FILTER] 해상도 기준 미달 ({width}x{height})으로 이미지 제외: {url}")
+                        return False
+                    
+                    print(f"[VALID] 해상도 검증 통과 ({width}x{height}): {url}")
+                    return True
+                    
+            except Exception as e:
+                print(f"[FILTER] 이미지 해상도 확인 실패로 제외: {url} - {e}")
+                return False
+                
+        except Exception as e:
+            print(f"[FILTER] 이미지 검증 중 오류로 제외: {url} - {e}")
+            return False
     
     def _save_result(self):
         """결과 저장 (SmartDetector 정보 포함)"""

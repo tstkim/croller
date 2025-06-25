@@ -12,13 +12,13 @@ import urllib.request
 import math
 
 # 테스트할 상품 개수 (선택자 검증용)
-TEST_PRODUCTS = 10
+TEST_PRODUCTS = 3
 
 # ===================== 사용자 편의 테스트 모드 =====================
 # 테스트 모드가 True면 상품을 TEST_PRODUCT_COUNT개만 추출하고, 엑셀도 정상 생성됨
 # False면 start_page ~ end_page 전체 페이지 크롤링
 TEST_MODE = True  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
-TEST_PRODUCT_COUNT = 2  # 테스트 모드에서 추출할 상품 개수
+TEST_PRODUCT_COUNT = 5  # 테스트 모드에서 추출할 상품 개수
 
 # ===================== 기본 설정 =====================
 code = "kidgym"  # 브랜드영문
@@ -56,13 +56,13 @@ SITE_NAME = code
 now = datetime.now()  # 현재 시간을 기록
 start_time = time.time()  # 작업 시작 시간을 기록
 print("택수님 ! 작업을 시작할께요.. 조금만 기다려주세요*^.^*")  # 작업 시작 알림
-tdate = now.strftime("%Y%m%d%H%M")
+tdate = now.strftime("%y%m%d%H")
 
 # SSL 오류 방지 설정
 ssl._create_default_https_context = ssl._create_unverified_context
 
-# 폴더 생성
-base_path = f'C:/Users/ME/Pictures/{tdate}{code}'
+# 폴더 생성 - 새로운 경로로 변경
+base_path = f'C:/Users/ME/Documents/project/croller/images/{tdate}{code}'
 thumbnail_path = f'{base_path}/cr'
 output_path = f'{base_path}/output'
 if os.path.exists(base_path):

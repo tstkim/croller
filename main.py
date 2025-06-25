@@ -42,13 +42,22 @@ class ProductCrawler(FinalAnalyzer):
         self.wb = openpyxl.Workbook()
         self.sheet = self.wb.active
         
-        # 엑셀 헤더 (절대 변경 금지)
+        # 엑셀 헤더 (config.py 표준 완전 준수 - 절대 변경 금지)
         self.headers = [
-            "상품번호", "상품명", "판매가", "시중가", "옵션", "모델명", "브랜드", 
-            "제조사", "원산지", "성인인증", "상품요약설명", "상품상세설명",
-            "상품태그", "검색키워드", "상품무게", "상품코드", "상품분류번호",
-            "진열순서", "진열상태", "판매상태", "품절상태", "메인진열",
-            "신상품", "추천상품", "할인상품", "이미지URL"
+            "업체상품코드", "모델명", "브랜드", "제조사", "원산지", "상품명", "홍보문구", "요약상품명",
+            "카테고리코드", "사용자분류명", "한줄메모", "시중가", "원가", "표준공급가", "판매가",
+            "배송방법", "배송비", "구매수량", "과세여부", "판매수량", "이미지1URL", "이미지2URL",
+            "이미지3URL", "이미지4URL", "GIF생성", "이미지6URL", "이미지7URL", "이미지8URL",
+            "이미지9URL", "이미지10URL", "추가정보입력사항", "옵션타입", "옵션구분", "선택옵션",
+            "입력형옵션", "추가구매옵션", "상세설명", "추가상세설명", "광고/홍보", "제조일자",
+            "유효일자", "사은품내용", "키워드", "인증구분", "인증정보", "거래처", "영어상품명",
+            "중국어상품명", "일본어상품명", "영어상세설명", "중국어상세설명", "일본어상세설명",
+            "상품무게", "영어키워드", "중국어키워드", "일본어키워드", "생산지국가",
+            "전세계배송코드", "사이즈", "포장방법", "상품상세코드", "상품상세1", "상품상세2",
+            "상품상세3", "상품상세4", "상품상세5", "상품상세6", "상품상세7", "상품상세8",
+            "상품상세9", "상품상세10", "상품상세11", "상품상세12", "상품상세13", "상품상세14",
+            "상품상세15", "상품상세16", "상품상세17", "상품상세18", "상품상세19", "상품상세20",
+            "상품상세21", "상품상세22", "상품상세23", "상품상세24"
         ]
         self.sheet.append(self.headers)
         
@@ -244,37 +253,107 @@ class ProductCrawler(FinalAnalyzer):
                     detail_img_urls, self.image_counter, product_name
                 )
             
-            # 5. 엑셀 데이터 생성 (기존 헤더 순서 완전 준수)
+            # 5. 엑셀 데이터 생성 (config.py 표준 86개 컬럼 완전 준수)
             options = product_data.get('선택옵션', [])
-            options_text = " / ".join([str(opt) for opt in options[:5]]) if options else ""
+            option_string = ""
+            if options:
+                option_list = []
+                for option_name in options:
+                    formatted_option = f"{option_name}==0=10000=0=0=0="
+                    option_list.append(formatted_option)
+                option_string = "[필수선택]\n" + "\n".join(option_list)
+                if option_string.count("10000") == 1:
+                    option_string = ""
+            
+            # config.py 방식과 동일한 상품코드 생성 (config.py의 now 변수 사용)
+            product_code = str(now)[3:4] + str(now)[5:7] + str(now)[8:10] + code + str(self.image_counter)
+            
+            # 썸네일 URL 생성 (config.py 형식)
+            thumbnail_url_final = f"http://ai.esmplus.com/tstkimtt/{tdate}{code}/cr/{self.image_counter}_cr.jpg"
+            
+            # 상세설명 HTML 생성 (config.py 형식)
+            detail_description = "<center> <img src='http://gi.esmplus.com/tstkimtt/head.jpg' /><br>"
+            for i in range(1, 11):
+                detail_description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{self.image_counter:03}_{i:03}.jpg' /><br />"
+            detail_description += "<img src='http://gi.esmplus.com/tstkimtt/deliver.jpg' /></center>"
+            
+            option_type = "" if option_string == "" else "SM"
             
             row_data = [
-                self.image_counter,  # 상품번호
-                product_name,        # 상품명
-                clean_price,         # 판매가
-                clean_price,         # 시중가
-                options_text,        # 옵션
-                "",                  # 모델명
-                "키드짐",            # 브랜드
-                "",                  # 제조사
-                "",                  # 원산지
-                "N",                 # 성인인증
-                "",                  # 상품요약설명
-                detail_description_html,  # 상품상세설명 (HTML 형식)
-                "",                  # 상품태그
-                "",                  # 검색키워드
-                "",                  # 상품무게
-                f"KG{self.image_counter:03}",  # 상품코드
-                "",                  # 상품분류번호
-                self.image_counter,  # 진열순서
-                "Y",                 # 진열상태
-                "Y",                 # 판매상태
-                "N",                 # 품절상태
-                "Y" if self.image_counter <= 5 else "N",  # 메인진열
-                "Y",                 # 신상품
-                "Y",                 # 추천상품
-                "N",                 # 할인상품
-                f"{self.image_counter}_cr.jpg"  # 이미지URL
+                product_code,           # 업체상품코드
+                "",                     # 모델명 (빈 값)
+                brandname,              # 브랜드 (config.py에서 가져옴)
+                brandname,              # 제조사 (config.py에서 가져옴)
+                "국내=서울=강남구",      # 원산지
+                product_name,           # 상품명
+                "",                     # 홍보문구 (빈 값)
+                "",                     # 요약상품명 (빈 값)
+                category,               # 카테고리코드 (config.py에서 가져옴)
+                code + tdate,           # 사용자분류명
+                "",                     # 한줄메모 (빈 값)
+                "",                     # 시중가 (빈 값)
+                "",                     # 원가 (빈 값)
+                "",                     # 표준공급가 (빈 값)
+                clean_price,            # 판매가
+                "선결제",               # 배송방법
+                "3500",                 # 배송비
+                "0",                    # 구매수량
+                "y",                    # 과세여부
+                "9000",                 # 판매수량
+                thumbnail_url_final,    # 이미지1URL
+                thumbnail_url_final,    # 이미지2URL
+                "",                     # 이미지3URL (빈 값)
+                "",                     # 이미지4URL (빈 값)
+                "",                     # GIF생성 (빈 값)
+                "",                     # 이미지6URL (빈 값)
+                "",                     # 이미지7URL (빈 값)
+                "",                     # 이미지8URL (빈 값)
+                "",                     # 이미지9URL (빈 값)
+                "",                     # 이미지10URL (빈 값)
+                "",                     # 추가정보입력사항 (빈 값)
+                option_type,            # 옵션타입
+                option_string,          # 옵션구분
+                "",                     # 선택옵션 (빈 값)
+                "",                     # 입력형옵션 (빈 값)
+                "",                     # 추가구매옵션 (빈 값)
+                detail_description,     # 상세설명
+                "",                     # 추가상세설명 (빈 값)
+                "",                     # 광고/홍보 (빈 값)
+                "",                     # 제조일자 (빈 값)
+                "",                     # 유효일자 (빈 값)
+                "",                     # 사은품내용 (빈 값)
+                "쿠폰",                 # 키워드
+                "",                     # 인증구분 (빈 값)
+                "c",                    # 인증정보
+                "",                     # 거래처 (빈 값)
+                "",                     # 영어상품명 (빈 값)
+                "",                     # 중국어상품명 (빈 값)
+                "",                     # 일본어상품명 (빈 값)
+                "",                     # 영어상세설명 (빈 값)
+                "",                     # 중국어상세설명 (빈 값)
+                "",                     # 일본어상세설명 (빈 값)
+                "25",                   # 상품무게
+                "",                     # 영어키워드 (빈 값)
+                "",                     # 중국어키워드 (빈 값)
+                "",                     # 일본어키워드 (빈 값)
+                "",                     # 생산지국가 (빈 값)
+                "",                     # 전세계배송코드 (빈 값)
+                "",                     # 사이즈 (빈 값)
+                "",                     # 포장방법 (빈 값)
+                "",                     # 상품상세코드 (빈 값)
+                "상세설명일괄참조",       # 상품상세1
+                "상세설명일괄참조",       # 상품상세2
+                "상세설명일괄참조",       # 상품상세3
+                "상세설명일괄참조",       # 상품상세4
+                "상세설명일괄참조",       # 상품상세5
+                "상세설명일괄참조",       # 상품상세6
+                "N",                    # 상품상세7 (사은품여부)
+                "상세설명일괄참조",       # 상품상세8
+                "상세설명일괄참조",       # 상품상세9
+                "상세설명일괄참조",       # 상품상세10
+                "상세설명일괄참조",       # 상품상세11
+                "상세설명일괄참조",       # 상품상세12
+                thumbnail_url_final     # 상품상세13 (마지막에 이미지 URL)
             ]
             
             # 6. 엑셀에 데이터 추가
@@ -302,11 +381,10 @@ class ProductCrawler(FinalAnalyzer):
             return 0
     
     def _save_excel_file(self):
-        """엑셀 파일 저장 (이미지 폴더와 같은 위치)"""
+        """엑셀 파일 저장 (키드짐 폴더 안)"""
         try:
-            tdate = datetime.now().strftime("%Y%m%d%H%M")
-            # 이미지 폴더와 같은 위치에 저장 (미리 저장된 경로 사용)
-            filename = f"{self.image_base_path}/{tdate}kr.xlsx"
+            # 키드짐 폴더 안에 엑셀 파일 저장
+            filename = f'C:/Users/ME/Documents/project/croller/images/{tdate}{code}/{tdate}{code}.xlsx'
             self.wb.save(filename)
             print(f"[EXCEL] 엑셀 파일 저장 완료: {filename}")
             

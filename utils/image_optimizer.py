@@ -12,17 +12,16 @@ class ImageDownloadOptimizer:
         self.max_workers = max_workers
         self.session = requests.Session()
         
-        # 공통 경로 설정 (한 번만 설정)
+        # config.py 표준 경로 설정 (절대 변경 금지)
         from datetime import datetime
-        tdate = datetime.now().strftime("%Y%m%d%H%M")
-        self.base_path = f"C:/Users/ME/Documents/project/croller/images/{tdate}kidgym"
-        self.cr_path = f"{self.base_path}/cr"
-        self.output_path = f"{self.base_path}/output"
+        from config import code, tdate, base_path, thumbnail_path, output_path
         
-        # 폴더 미리 생성
-        os.makedirs(self.cr_path, exist_ok=True)
-        os.makedirs(self.output_path, exist_ok=True)
-        print(f"[INIT] 이미지 저장 경로 설정: {self.base_path}")
+        # config.py에서 정의된 경로 사용
+        self.base_path = base_path
+        self.cr_path = thumbnail_path  # config.py의 thumbnail_path
+        self.output_path = output_path  # config.py의 output_path
+        
+        print(f"[INIT] config.py 표준 경로 사용: {self.base_path}")
         
         # 키드짐 사이트에 특화된 헤더 설정
         self.session.headers.update({
@@ -104,11 +103,11 @@ class ImageDownloadOptimizer:
                     img_y = (550 - original_img.height) // 2
                     canvas.paste(original_img, (img_x, img_y))
                     
-                    # S2B REGISTERED 배지 (우측 상단) - 파란색 박스 세로 20% 축소!
-                    blue_background = Image.new('RGB', (150, 80), (0, 82, 204))  # S2B 파란색 (100→80으로 20% 축소)
-                    canvas.paste(blue_background, (500, 0))  # (530, 0) → (500, 0)으로 이동
-                    red_badge = Image.new('RGB', (150, 50), (255, 61, 70))  # 빨간색 (120→150, 40→50으로 확장)
-                    canvas.paste(red_badge, (500, 80))  # (530, 80) → (500, 80)으로 이동 (파란색 박스 크기에 맞춤)
+                    # S2B REGISTERED 배지 (우측 상단 모서리에 딱 붙이기)
+                    blue_background = Image.new('RGB', (120, 80), (0, 82, 204))  # 파란색 박스
+                    canvas.paste(blue_background, (530, 0))  # 650-120=530, Y=0 (모서리)
+                    red_badge = Image.new('RGB', (120, 40), (255, 61, 70))  # 빨간색 박스
+                    canvas.paste(red_badge, (530, 80))  # 파란색 박스 바로 아래
                     
                     draw = ImageDraw.Draw(canvas)
                     
@@ -141,22 +140,22 @@ class ImageDownloadOptimizer:
                         text_width, text_height = draw.textsize(display_name, font=name_font)
                     
                     text_x = (650 - text_width) // 2
-                    text_y = 540 + (100 - text_height) // 2  # 550→540으로 10px 위로 이동
-                    draw.text((text_x, text_y), display_name, font=name_font, fill="white", stroke_fill="black", stroke_width=1)
+                    text_y = 560  # 회색 영역(550~650) 상단에서 10px 아래
+                    draw.text((text_x, text_y), display_name, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
                     
-                    # S2B 배지 텍스트 - S2B는 크게, REGISTERED는 30% 줄임
+                    # S2B 배지 텍스트
                     try:
-                        s2b_font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 60)  # 30→60으로 2배 증가
-                        reg_font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 20)  # 28→20으로 30% 감소
+                        s2b_font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 60)
+                        reg_font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 16)
                     except:
                         try:
                             s2b_font = ImageFont.truetype("C:/Windows/Fonts/Arial.ttf", 60)
-                            reg_font = ImageFont.truetype("C:/Windows/Fonts/Arial.ttf", 20)  # 28→20으로 30% 감소
+                            reg_font = ImageFont.truetype("C:/Windows/Fonts/Arial.ttf", 16)
                         except:
                             s2b_font = ImageFont.load_default()
                             reg_font = ImageFont.load_default()
                     
-                    # "S2B" 텍스트 (파란색 영역) - 새로운 배지 크기에 맞춤
+                    # "S2B" 텍스트 (파란색 영역)
                     s2b_text = "S2B"
                     try:
                         bbox = draw.textbbox((0, 0), s2b_text, font=s2b_font)
@@ -164,11 +163,11 @@ class ImageDownloadOptimizer:
                     except AttributeError:
                         s2b_width, _ = draw.textsize(s2b_text, font=s2b_font)
                     
-                    s2b_x = 500 + (150 - s2b_width) // 2  # 새로운 배지 크기에 맞춰 조정 (150px 폭)
-                    s2b_y = 15  # 축소된 파란색 박스(80px)의 중앙에 맞춤 (20→15로 조정)
+                    s2b_x = 530 + (120 - s2b_width) // 2  # 새로운 배지 위치(530)에 맞춰 조정
+                    s2b_y = 20  # 파란색 박스(80px) 중앙에 맞춤
                     draw.text((s2b_x, s2b_y), s2b_text, font=s2b_font, fill="white")
                     
-                    # "REGISTERED" 텍스트 (빨간색 영역) - 새로운 배지 크기에 맞춤
+                    # "REGISTERED" 텍스트 (빨간색 영역) - 새로운 배지 위치에 맞춤
                     reg_text = "REGISTERED"
                     try:
                         bbox = draw.textbbox((0, 0), reg_text, font=reg_font)
@@ -176,8 +175,8 @@ class ImageDownloadOptimizer:
                     except AttributeError:
                         reg_width, _ = draw.textsize(reg_text, font=reg_font)
                     
-                    reg_x = 500 + (150 - reg_width) // 2  # 새로운 배지 크기에 맞춰 조정 (150px 폭)
-                    reg_y = 95  # 빨간색 배경 위에 (115→95로 20px 위로 이동)
+                    reg_x = 530 + (120 - reg_width) // 2  # 새로운 배지 위치(530)에 맞춰 조정
+                    reg_y = 95  # 빨간색 배경 위에 (80+15=95)
                     draw.text((reg_x, reg_y), reg_text, font=reg_font, fill="white")
                     
                     # 최종 이미지 저장
@@ -207,7 +206,7 @@ class ImageDownloadOptimizer:
             return False
 
     def download_and_process_detail_images(self, detail_img_urls, image_counter, product_name):
-        """상세이미지 다운로드 및 처리"""
+        """상세이미지 다운로드 및 처리 (기존 main.py 방식: 결합 후 10등분)"""
         try:
             if not detail_img_urls:
                 return False
@@ -219,9 +218,11 @@ class ImageDownloadOptimizer:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
             
-            processed_count = 0
+            # 1. 모든 상세이미지를 다운로드하고 하나로 결합
+            combined_image = None
+            valid_images = []
             
-            for idx, img_url in enumerate(detail_img_urls[:10]):  # 최대 10개
+            for idx, img_url in enumerate(detail_img_urls):
                 try:
                     print(f"[DETAIL] 이미지 {idx+1} 다운로드: {img_url}")
                     
@@ -229,40 +230,83 @@ class ImageDownloadOptimizer:
                     response = self.session.get(img_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     
-                    # 상세이미지 파일명 (예: 001_001.jpg, 001_002.jpg)
-                    detail_filename = f"{image_counter:03}_{idx+1:03}.jpg"
-                    detail_path = f"{self.output_path}/{detail_filename}"
+                    # 임시 파일로 저장
+                    temp_filename = f"temp_detail_{image_counter}_{idx}.jpg"
+                    temp_path = f"{self.output_path}/{temp_filename}"
                     
-                    # 이미지 저장
-                    with open(detail_path, 'wb') as f:
+                    with open(temp_path, 'wb') as f:
                         f.write(response.content)
                     
-                    print(f"[DETAIL] 상세이미지 저장 성공: {detail_path}")
+                    # 이미지 열기 및 크기 확인
+                    with Image.open(temp_path) as img:
+                        img = img.convert("RGB")
+                        width, height = img.size
+                        print(f"[DETAIL] 이미지 크기: {width}x{height}")
+                        
+                        if width >= 660:  # 유효한 해상도만 사용
+                            valid_images.append(img.copy())
+                            print(f"[DETAIL] 유효한 이미지: {width}px >= 660px")
+                        else:
+                            print(f"[WARNING] 이미지 너비 부족: {width}px < 660px")
                     
-                    # 간단한 크기 확인 (660px 이상만)
-                    try:
-                        with Image.open(detail_path) as img:
-                            width, height = img.size
-                            print(f"[DETAIL] 이미지 크기: {width}x{height}")
-                            
-                            if width >= 660:
-                                processed_count += 1
-                                print(f"[DETAIL] 유효한 이미지: {width}px >= 660px")
-                            else:
-                                print(f"[WARNING] 이미지 너비 부족: {width}px < 660px")
-                                # 작은 이미지도 일단 유지
-                                processed_count += 1
-                                
-                    except Exception as check_error:
-                        print(f"[WARNING] 이미지 크기 확인 실패: {check_error}")
-                        processed_count += 1
+                    # 임시 파일 삭제
+                    os.remove(temp_path)
                     
                 except Exception as img_error:
                     print(f"[ERROR] 이미지 {idx+1} 처리 실패: {img_error}")
                     continue
             
-            print(f"[DETAIL] 상세이미지 처리 완료: {processed_count}개 성공")
-            return processed_count > 0
+            if not valid_images:
+                print(f"[ERROR] 유효한 상세이미지가 없음")
+                return False
+            
+            print(f"[DETAIL] 유효한 이미지 {len(valid_images)}개 결합 시작")
+            
+            # 2. 이미지를 세로로 결합 (기존 main.py 방식)
+            combined_image = None
+            for img in valid_images:
+                if combined_image is None:
+                    combined_image = img
+                else:
+                    # 너비를 맞춤 (큰 쪽으로)
+                    combined_width = max(combined_image.width, img.width)
+                    combined_height = combined_image.height + img.height
+                    
+                    # 새로운 결합 이미지 생성
+                    new_combined_image = Image.new("RGB", (combined_width, combined_height), "white")
+                    new_combined_image.paste(combined_image, (0, 0))
+                    new_combined_image.paste(img, (0, combined_image.height))
+                    
+                    combined_image.close()
+                    combined_image = new_combined_image
+            
+            # 3. 결합된 이미지를 10등분해서 저장 (기존 main.py 방식)
+            if combined_image is not None:
+                width, height = combined_image.size
+                slice_height = height // 10  # 이미지 하나의 높이
+                
+                print(f"[DETAIL] 결합 이미지 크기: {width}x{height}, 조각 높이: {slice_height}")
+                
+                for i in range(10):
+                    crop_area = (0, slice_height * i, width, slice_height * (i + 1))  # 이미지 자르는 영역 설정
+                    cropped_img = combined_image.crop(crop_area)  # 이미지 자르기
+                    
+                    # 파일명: 기존 main.py 방식과 동일 (001_001.jpg, 001_002.jpg ...)
+                    detail_filename = f"{image_counter:03}_{i + 1:03}.jpg"
+                    detail_path = f"{self.output_path}/{detail_filename}"
+                    
+                    cropped_img.save(detail_path, 'JPEG', quality=90)  # 잘린 이미지 저장
+                    print(f"[DETAIL] 조각 {i+1} 저장: {detail_path}")
+                    
+                    cropped_img.close()
+                
+                combined_image.close()
+                print(f"[DETAIL] 상세이미지 처리 완료: 10개 조각 생성")
+                return True
+            
+            else:
+                print(f"[ERROR] 이미지 결합 실패")
+                return False
             
         except Exception as e:
             print(f"[ERROR] 상세이미지 처리 실패: {e}")

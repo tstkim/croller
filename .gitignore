@@ -1,52 +1,55 @@
-# IDE 설정 파일
-.vs/
-.vscode/
-*.suo
-*.user
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
-# 빌드 산출물
-*.exe
-*.dll
-*.pak
-*.dat
-*.bin
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
 *.log
+*.backup
+output/
+images/*/
+!images/.gitkeep
+perfect_result_*.json
+!perfect_result_*.json.backup
 
-# 브라우저 관련 파일
-chrome_*.pak
-d3dcompiler_*.dll
-ffmpeg.dll
-icudtl.dat
-libEGL.dll
-libGLESv2.dll
+# Claude Desktop
+.claude/
+claude.exe
+*.pak
+*.dll
+*.dat
 locales/
-resources.pak
 resources/
+resources.pak
 snapshot_blob.bin
 squirrel.exe
-v8_context_snapshot.bin
-vk_swiftshader.*
+*.bin
+*.json
+vk_swiftshader*
 vulkan-1.dll
+ffmpeg.dll
 
-# 로그 파일
-*.log
-app.log
-Squirrel-UpdateSelf.log
-
-# 테스트 결과물
-perfect_result_*.json
-login_error.png
-
-# Python 가상환경
+# Virtual environment
 venv/
-env/
 
-# 임시 파일
-*.tmp
-*.temp
-
-# 이미지 출력 폴더 (결과물)
-C:/Users/ME/Pictures/
+# Test results
+test_*.jpg
+improved_thumb_*.jpg

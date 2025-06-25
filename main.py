@@ -1,1194 +1,343 @@
-from config import *
-from playwright.sync_api import sync_playwright
-from PIL import ImageFont
-import logging
-import urllib.request
-from PIL import Image, ImageDraw
-import math
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import asyncio
+import ssl
 import time
-import glob
-import os
-import json
-from urllib.parse import urljoin
+import re
+import logging
+from datetime import datetime
+from openpyxl import Workbook
+from config import *
+from utils.image_optimizer import ImageDownloadOptimizer
 from final_analyzer_universal import FinalAnalyzer
-import requests
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
 
-class ImageDownloadOptimizer:
-    """이미지 다운로드 성능 최적화 클래스"""
+
+# SSL 인증서 검증 비활성화
+ssl._create_default_https_context = ssl._create_unverified_context
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# 테스트할 상품 개수 추가 확인
+TEST_PRODUCTS = getattr(sys.modules[__name__], 'TEST_PRODUCTS', 3) if 'sys' in locals() else 3
+
+
+class ProductCrawler(FinalAnalyzer):
+    """FinalAnalyzer를 상속받아 대량 크롤링을 수행하는 클래스"""
     
-    def __init__(self, max_workers=4, timeout=15):
-        self.session = requests.Session()
-        # 키드짐 사이트에 맞는 헤더 설정
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://kidgymb2b.co.kr/',
-            'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'image',
-            'Sec-Fetch-Mode': 'no-cors',
-            'Sec-Fetch-Site': 'same-origin'
-        })
-        self.max_workers = max_workers
-        self.timeout = timeout
-        self.verified_urls = {}  # URL -> (valid, file_size) 캐시
-        self.lock = Lock()
+    def __init__(self):
+        super().__init__()  # FinalAnalyzer 초기화
+        # 성능 측정 변수들
+        self.image_counter = 1
+        self.start_time = time.time()
+        self.json_products_count = 0
+        self.fallback_products_count = 0
+        self.json_processing_time = 0
+        self.fallback_processing_time = 0
+        self.network_requests_saved = 0
         
-    def check_image_size_parallel(self, urls):
-        """병렬로 이미지 크기 검증"""
-        print(f"[PERF] 병렬 이미지 크기 검증 시작: {len(urls)}개 URL")
+        # 엑셀 설정
+        import openpyxl
+        self.wb = openpyxl.Workbook()
+        self.sheet = self.wb.active
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_url = {executor.submit(self._check_single_image, url): url for url in urls}
-            results = {}
-            
-            for future in future_to_url:
-                url = future_to_url[future]
-                try:
-                    results[url] = future.result()
-                except Exception as e:
-                    print(f"[ERROR] 이미지 크기 검증 실패 {url}: {e}")
-                    results[url] = (False, 0)
-                    
-        print(f"[PERF] 병렬 검증 완료: {sum(1 for valid, _ in results.values() if valid)}개 유효")
-        return results
-    
-    def _check_single_image(self, url):
-        """단일 이미지 크기 검증 (캐시 활용)"""
-        with self.lock:
-            if url in self.verified_urls:
-                return self.verified_urls[url]
+        # 엑셀 헤더 (절대 변경 금지)
+        self.headers = [
+            "상품번호", "상품명", "판매가", "시중가", "옵션", "모델명", "브랜드", 
+            "제조사", "원산지", "성인인증", "상품요약설명", "상품상세설명",
+            "상품태그", "검색키워드", "상품무게", "상품코드", "상품분류번호",
+            "진열순서", "진열상태", "판매상태", "품절상태", "메인진열",
+            "신상품", "추천상품", "할인상품", "이미지URL"
+        ]
+        self.sheet.append(self.headers)
         
-        try:
-            # HEAD 요청으로 파일 크기 확인
-            head_response = self.session.head(url, timeout=self.timeout, allow_redirects=True)
-            
-            if head_response.status_code == 200:
-                content_length = head_response.headers.get('content-length')
-                if content_length:
-                    file_size = int(content_length)
-                    # 50KB 이상만 유효로 판단
-                    is_valid = file_size >= 50000
-                    
-                    with self.lock:
-                        self.verified_urls[url] = (is_valid, file_size)
-                    
-                    return (is_valid, file_size)
-                    
-        except Exception as e:
-            print(f"[DEBUG] HEAD 요청 실패 {url}: {e}")
-            
-        # HEAD 실패 시 기본값
-        with self.lock:
-            self.verified_urls[url] = (False, 0)
-        return (False, 0)
+        # 방문한 링크 추적
+        self.visited_links = set()
+        self.product_infos = []
+        
+        # 이미지 다운로드 최적화 객체
+        self.download_optimizer = ImageDownloadOptimizer()
+        # 이미지 폴더 경로 저장 (엑셀 저장 시 같은 경로 사용)
+        self.image_base_path = self.download_optimizer.base_path
     
-    def download_image_optimized(self, url, save_path):
-        """최적화된 이미지 다운로드"""
-        try:
-            response = self.session.get(url, timeout=self.timeout, stream=True)
-            response.raise_for_status()
+    async def run_full_crawling(self):
+        """메인 크롤링 실행 (JSON 의존성 제거됨)"""
+        print("[JSON_REMOVED] ProductCrawler 시작 - JSON 파일 의존성 제거됨")
+        
+        # Playwright 브라우저 초기화 (FinalAnalyzer 패턴 활용)
+        from playwright.async_api import async_playwright
+        
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+            page = await context.new_page()
             
-            with open(save_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            
-            print(f"[PERF] 최적화 다운로드 성공: {save_path}")
-            return True
-            
-        except Exception as e:
-            print(f"[ERROR] 최적화 다운로드 실패 {url}: {e}")
-            # fallback to urllib
             try:
-                urllib.request.urlretrieve(url, save_path)
-                print(f"[FALLBACK] urllib 다운로드 성공: {save_path}")
-                return True
-            except Exception as e2:
-                print(f"[ERROR] fallback 다운로드도 실패: {e2}")
-                return False
-    
-    def close(self):
-        """세션 정리"""
-        self.session.close()
-        print("[PERF] ImageDownloadOptimizer 세션 정리 완료")
-
-def is_valid_option(text):
-    """유효한 선택옵션인지 판단"""
-    if not text:
-        return False
-    
-    text_lower = text.lower().strip()
-    
-    # 완전히 제외할 패턴들 (정확히 일치하는 경우만)
-    exact_exclude = [
-        '선택', '-- 선택 --', '옵션선택', '옵션을 선택해주세요',
-        '- 무게 선택 -', '- 색상 선택 -', '- 사이즈 선택 -',
-        '- 종류 선택 -', '- 크기 선택 -'
-    ]
-    
-    # 포함된 경우 제외할 패턴들
-    partial_exclude = [
-        '택배(주문 시 결제)', '배송비', '주문 시 결제', '택배'
-    ]
-    
-    # 정확히 일치하는 제외 패턴 확인
-    for pattern in exact_exclude:
-        if text.strip() == pattern or text_lower == pattern.lower():
-            return False
-    
-    # 부분 일치하는 제외 패턴 확인
-    for pattern in partial_exclude:
-        if pattern.lower() in text_lower:
-            return False
-    
-    return True
-
-# 로그 설정
-logging.basicConfig(filename='app.log', level=logging.INFO)
-
-# 유효한 상세 이미지인지 판단하는 함수
-def is_valid_detail_image(url):
-    """유효한 상세 이미지인지 판단"""
-    if not url:
-        return False
-    
-    url_lower = url.lower()
-    
-    # 제외할 패턴들
-    exclude_patterns = [
-        'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
-        'arrow', 'quick', 'zzim', 'wishlist',
-        'banner', 'common', 'header', 'footer',
-        'popup', 'close', 'search', 'cart',
-        'sns', 'facebook', 'twitter', 'kakao',
-        'top_btn', 'scroll', 'floating',
-        '_wg/', 'detail_img_info', 'delivery_info',
-        'exchange_info', 'return_info', 'notice_info'
-    ]
-    
-    for pattern in exclude_patterns:
-        if pattern in url_lower:
-            # print(f"[DEBUG] '{pattern}' 패턴 발견, 이미지 제외: {url}")  # 디버깅 메시지 주석처리
-            return False
-    
-    # 포함되어야 할 패턴들
-    include_patterns = [
-        'detail', 'content', 'description', 'product',
-        'item', 'goods', 'view', 'main', 'sub'
-    ]
-    has_include = any(pattern in url_lower for pattern in include_patterns)
-    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
-    has_image_ext = any(ext in url_lower for ext in image_extensions)
-    return has_include or has_image_ext
-
-def get_fitting_font(draw, text, max_width, font_path, max_font_size=65, min_font_size=30):
-    """상품명 길이에 따라 글자 크기를 동적으로 조정 (최소 30pt)"""
-    font_size = max_font_size
-    while font_size >= min_font_size:
-        try:
-            font = ImageFont.truetype(font_path, font_size)
-            try:
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-            except AttributeError:
-                text_width, _ = draw.textsize(text, font=font)
-            if text_width <= max_width:
-                return font
-        except Exception as e:
-            print(f"[ERROR] 폰트 사이즈 {font_size}에서 오류: {e}")
-        font_size -= 2
-    return ImageFont.truetype(font_path, min_font_size)
-
-# Playwright를 사용한 웹드라이버 설정 및 시작
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)  # 헤드리스 모드로 변경
-    page = browser.new_page()
-    
-    # 성능 최적화 객체 초기화
-    download_optimizer = ImageDownloadOptimizer(max_workers=4, timeout=15)
-    print("[PERF] 이미지 다운로드 최적화 시스템 초기화 완료")
-    
-    # 데스크탑 모드로 설정
-    page.set_viewport_size({"width": 1920, "height": 1080})
-    page.set_extra_http_headers({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    })
-    
-    # 이미지 파일명을 고유하게 만들기 위한 카운터
-    image_counter = 1
-
-    start_time = time.time()
-
-    try:
-        # 최신 perfect_result_*.json 파일에서 선택자 읽기
-        json_files = glob.glob("perfect_result_*.json")
-        if not json_files:
-            raise FileNotFoundError("perfect_result_*.json 파일이 없습니다.")
-        latest_json = max(json_files, key=os.path.getmtime)
-        with open(latest_json, "r", encoding="utf-8") as f:
-            selectors = json.load(f)["선택자"]
-
-        if use_login:
-            try:
-                # 로그인 페이지로 이동
-                page.goto(login_url)
-                # 선택자 json에서 로그인 selector 사용
-                id_selector = selectors.get('로그인_아이디_선택자')
-                pw_selector = selectors.get('로그인_비밀번호_선택자')
-                btn_selector = selectors.get('로그인_버튼_선택자')
-                if not id_selector or not pw_selector:
-                    raise Exception('로그인 selector 정보가 부족합니다.')
-                page.wait_for_selector(id_selector, timeout=5000)
-                page.wait_for_selector(pw_selector, timeout=5000)
-                # 디버깅: 선택자에 해당하는 input 개수 출력
-                id_inputs = page.query_selector_all(id_selector)
-                pw_inputs = page.query_selector_all(pw_selector)
-                print(f"[DEBUG] id_selector matches {len(id_inputs)} elements")
-                print(f"[DEBUG] pw_selector matches {len(pw_inputs)} elements")
-                page.fill(id_selector, login_credentials['userid'])
-                page.fill(pw_selector, login_credentials['password'])
-                if btn_selector:
-                    page.click(btn_selector)
+                print("[JSON_REMOVED] 실시간 선택자 탐지 모드로 전환")
+                
+                # 1. 로그인 처리 (부모 클래스 login_manager 활용)
+                if LOGIN_REQUIRED:
+                    login_selectors = await self.login_manager.auto_login(page, MAIN_URL, USERNAME, PASSWORD)
+                    await asyncio.sleep(1)
+                    print(f"[LOG] 로그인 후 쿠키: {await context.cookies()}")
+                    await page.reload()
+                    if login_selectors:
+                        self.selectors['로그인_아이디_선택자'] = login_selectors.get('id')
+                        self.selectors['로그인_비밀번호_선택자'] = login_selectors.get('pw')
+                        self.selectors['로그인_버튼_선택자'] = login_selectors.get('btn')
+                
+                print(f"[LOG] 로그인 후 현재 URL: {page.url}")
+                
+                # 2. 갤러리 페이지로 이동
+                await page.goto(GALLERY_URL, wait_until="domcontentloaded", timeout=30000, referer=MAIN_URL)
+                await page.wait_for_load_state("networkidle", timeout=15000)
+                print(f"[LOG] 갤러리 이동 후 현재 URL: {page.url}")
+                
+                # 3. 상품 링크 선택자 동적 탐지
+                product_link_selector = await self._detect_product_link_selector(page)
+                self.selectors['상품링크'] = product_link_selector
+                
+                # 4. 테스트 링크 수집
+                test_links = await self._get_test_links(page, product_link_selector)
+                print(f"[OK] 수집된 테스트 링크: {len(test_links)}개")
+                
+                if test_links:
+                    # 5. 실시간 선택자 탐지 (부모 클래스 메서드 활용)
+                    print(f"[JSON_REMOVED] 실시간 선택자 탐지 시작...")
+                    await self._analyze_selectors(page, test_links[0])
+                    
+                    print(f"[SUCCESS] 선택자 탐지 완료: {len(self.selectors)}개")
+                    for key, value in self.selectors.items():
+                        print(f"   [SELECTOR] {key}: {value}")
+                    
+                    # 6. 실제 상품 크롤링 시작 (TEST_PRODUCT_COUNT만큼)
+                    print(f"[CRAWLING] {TEST_PRODUCT_COUNT}개 상품 크롤링 시작...")
+                    await self._crawl_products(page, test_links)
+                    
+                    # 7. 엑셀 파일 저장
+                    self._save_excel_file()
+                    
+                    print(f"[SUCCESS] 크롤링 완료: {self.image_counter-1}개 상품 처리")
+                    
                 else:
-                    page.keyboard.press('Enter')
-                page.wait_for_timeout(5000)
+                    print("[ERROR] 테스트 링크 수집 실패 - Fallback 로직 필요")
+                    return False
                 
-                # 로그인 성공 여부 확인
-                if "login" in page.url.lower() or "로그인" in page.content():
-                    raise Exception("로그인 실패 - 로그인 페이지에 여전히 있음")
-                
-                logging.info("로그인 성공")
-                print("[DEBUG] 로그인 성공")
-                print(f"[DEBUG] 로그인 후 URL: {page.url}")
             except Exception as e:
-                logging.error(f"로그인 중 오류 발생: {e}")
-                print(f"[DEBUG] 로그인 실패: {e}")
-                print(f"[DEBUG] 현재 페이지 URL: {page.url}")
-                print(f"[DEBUG] 페이지 제목: {page.title()}")
-                page.screenshot(path="login_error.png")
-
-        visited_links = set()
-        seen_product_names = set()  # 상품명 중복 검증용 (유효한 상품명만 추가)
-        product_infos = []  # (image_counter, product_name, adjusted_price, product_link, ...) 저장용
+                print(f"[ERROR] 크롤링 실행 실패: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+            finally:
+                await browser.close()
         
-        def is_valid_product_name(name):
-            """상품명 유효성 검증 함수"""
-            if not name or not name.strip():
+        print("[JSON_REMOVED] ProductCrawler 실행 완료")
+        return True
+    
+    async def _crawl_products(self, page, test_links):
+        """상품 크롤링 실행 (TEST_PRODUCT_COUNT만큼)"""
+        successful_count = 0
+        seen_names = set()  # 중복 상품명 방지
+        
+        for i in range(min(len(test_links), 20)):  # 최대 20개 링크에서 시도
+            if successful_count >= TEST_PRODUCT_COUNT:
+                print(f"[COMPLETE] 목표 달성! {TEST_PRODUCT_COUNT}개 상품 추출 완료")
+                break
+                
+            link = test_links[i]
+            print(f"\n{'='*50}")
+            print(f"[PRODUCT] 상품 {i+1} 처리 중... (성공: {successful_count}/{TEST_PRODUCT_COUNT})")
+            print(f"[LINK] {link}")
+            
+            try:
+                success = await self._extract_and_save_product(page, link, seen_names)
+                if success:
+                    successful_count += 1
+                    print(f"[SUCCESS] 상품 {i+1} 성공! ({successful_count}/{TEST_PRODUCT_COUNT})")
+                else:
+                    print(f"[SKIP] 상품 {i+1} 건너뜀")
+                    
+            except Exception as e:
+                print(f"[ERROR] 상품 {i+1} 오류: {str(e)[:100]}")
+            
+            # 서버 부하 방지
+            if i < len(test_links) - 1:
+                await asyncio.sleep(1)
+        
+        print(f"[RESULT] 크롤링 완료: {successful_count}개 성공")
+    
+    async def _extract_and_save_product(self, page, url, seen_names):
+        """단일 상품 추출 및 저장 (부모 클래스 메서드 활용 + 이미지/엑셀 처리)"""
+        try:
+            # 1. 부모 클래스의 _extract_single_product 메서드 활용
+            product_data = await self._extract_single_product(page, url)
+            
+            if not product_data or not product_data.get('상품명'):
+                print(f"[SKIP] 상품 데이터 추출 실패: {url}")
                 return False
             
-            # 기본값 또는 오류 메시지 제외
-            invalid_patterns = [
-                '상품명을 찾을 수 없습니다', '제품명 없음', '상품명 오류',
-                '좋아요', '장바구니', '버튼', '클릭', '메뉴', '네비게이션',
-                # 키드짐 특화 UI 요소
-                '볼&골대', '댄스&창', '댄스&소셜', '네트게임', '타겟게임',
-                '흔바테감', '네트리더', '게임도구', '음향기기', '무대배경',
-                '교구', '체육용품', '놀이기구', '무대도구'
+            # 2. 상품명 중복 체크
+            product_name = product_data.get('상품명', '').strip()
+            if product_name.lower() in seen_names:
+                print(f"[SKIP] 중복 상품명: {product_name}")
+                return False
+            seen_names.add(product_name.lower())
+            
+            # 3. 상품 상세설명 HTML 추출 (키드짐 특수 요구사항)
+            detail_description_html = ""
+            try:
+                # 상세설명 영역 선택자들 (키드짐 사이트 기준)
+                description_selectors = [
+                    '.goods_intro_detail',
+                    '.detail_content', 
+                    '.product_detail',
+                    '.goods_detail_content',
+                    '.item_detail_area',
+                    '[class*="detail"]',
+                    '[class*="intro"]'
+                ]
+                
+                for selector in description_selectors:
+                    try:
+                        elements = await page.query_selector_all(selector)
+                        if elements:
+                            for element in elements:
+                                html_content = await element.inner_html()
+                                if html_content and len(html_content.strip()) > 50:  # 의미있는 내용만
+                                    detail_description_html = html_content.strip()
+                                    print(f"[DETAIL_DESC] 상세설명 추출 성공: {len(detail_description_html)}글자")
+                                    break
+                            if detail_description_html:
+                                break
+                    except Exception as e:
+                        continue
+                
+                if not detail_description_html:
+                    print(f"[WARNING] 상세설명 추출 실패: {url}")
+                    
+            except Exception as e:
+                print(f"[ERROR] 상세설명 추출 중 오류: {e}")
+            
+            # 4. 가격 필터링 (10000원 미만 제외)
+            price_text = product_data.get('가격', '0')
+            clean_price = self._parse_price(price_text)
+            if clean_price < 10000:
+                print(f"[SKIP] 가격 기준 미달: {clean_price}원 < 10000원")
+                return False
+            
+            # 4. 이미지 다운로드 및 처리
+            thumbnail_url = product_data.get('썸네일', '')
+            detail_img_urls = product_data.get('상세페이지', [])
+            
+            # 썸네일 처리
+            thumbnail_success = False
+            if thumbnail_url:
+                thumbnail_success = self.download_optimizer.download_and_process_thumbnail(
+                    thumbnail_url, self.image_counter, product_name
+                )
+            
+            # 상세이미지 처리  
+            detail_success = False
+            if detail_img_urls:
+                detail_success = self.download_optimizer.download_and_process_detail_images(
+                    detail_img_urls, self.image_counter, product_name
+                )
+            
+            # 5. 엑셀 데이터 생성 (기존 헤더 순서 완전 준수)
+            options = product_data.get('선택옵션', [])
+            options_text = " / ".join([str(opt) for opt in options[:5]]) if options else ""
+            
+            row_data = [
+                self.image_counter,  # 상품번호
+                product_name,        # 상품명
+                clean_price,         # 판매가
+                clean_price,         # 시중가
+                options_text,        # 옵션
+                "",                  # 모델명
+                "키드짐",            # 브랜드
+                "",                  # 제조사
+                "",                  # 원산지
+                "N",                 # 성인인증
+                "",                  # 상품요약설명
+                detail_description_html,  # 상품상세설명 (HTML 형식)
+                "",                  # 상품태그
+                "",                  # 검색키워드
+                "",                  # 상품무게
+                f"KG{self.image_counter:03}",  # 상품코드
+                "",                  # 상품분류번호
+                self.image_counter,  # 진열순서
+                "Y",                 # 진열상태
+                "Y",                 # 판매상태
+                "N",                 # 품절상태
+                "Y" if self.image_counter <= 5 else "N",  # 메인진열
+                "Y",                 # 신상품
+                "Y",                 # 추천상품
+                "N",                 # 할인상품
+                f"{self.image_counter}_cr.jpg"  # 이미지URL
             ]
             
-            # 너무 짧거나 긴 상품명 제외
-            if len(name.strip()) < 2 or len(name.strip()) > 100:
-                return False
-                
-            # 유효하지 않은 패턴 포함 여부 확인
-            for pattern in invalid_patterns:
-                if pattern.lower() in name.lower():
-                    return False
-                    
+            # 6. 엑셀에 데이터 추가
+            self.sheet.append(row_data)
+            
+            print(f"[SAVE] 상품 저장 완료: {product_name} | {clean_price}원")
+            print(f"   [IMAGES] 썸네일: {'OK' if thumbnail_success else 'FAIL'}, 상세: {'OK' if detail_success else 'FAIL'}")
+            
+            self.image_counter += 1
             return True
+            
+        except Exception as e:
+            print(f"[ERROR] 상품 추출 실패: {e}")
+            return False
+    
+    def _parse_price(self, price_text):
+        """가격 텍스트에서 숫자 추출"""
+        try:
+            if not price_text:
+                return 0
+            # 숫자만 추출
+            numbers = re.findall(r'\d+', str(price_text).replace(',', ''))
+            return int(numbers[0]) if numbers else 0
+        except:
+            return 0
+    
+    def _save_excel_file(self):
+        """엑셀 파일 저장 (이미지 폴더와 같은 위치)"""
+        try:
+            tdate = datetime.now().strftime("%Y%m%d%H%M")
+            # 이미지 폴더와 같은 위치에 저장 (미리 저장된 경로 사용)
+            filename = f"{self.image_base_path}/{tdate}kr.xlsx"
+            self.wb.save(filename)
+            print(f"[EXCEL] 엑셀 파일 저장 완료: {filename}")
+            
+            # 성능 리포트
+            end_time = time.time()
+            total_time = end_time - self.start_time
+            print(f"[PERF] 총 처리 시간: {total_time:.2f}초")
+            print(f"[PERF] 처리된 상품: {self.image_counter-1}개")
+            
+        except Exception as e:
+            print(f"[ERROR] 엑셀 저장 실패: {e}")
 
-        # 페이지 반복 처리
-        for page_number in range(start_page, end_page + 1):
-            try:
-                url = catalog_url_template.format(page=page_number)
-                print(f"[DEBUG] 카탈로그 URL: {url}")
-                page.goto(url)
-                page.wait_for_timeout(3000)
-                
-                # 스크롤을 아래로 내리면서 상품 로드 대기
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(2000)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(3000)
-                
-                soup = bs(page.content(), 'html.parser')
-                base_url = product_base_url
 
-                # 제품 리스트 선택자 적용 (perfect_result에서 가져온 선택자 직접 사용)
-                product_list_selector = selectors.get("상품리스트")
-                print(f"[DEBUG] 사용할 상품리스트 선택자: {product_list_selector}")
-                
-                # perfect_result의 선택자로 상품 찾기
-                try:
-                    product_list = soup.select(product_list_selector)
-                    print(f"[DEBUG] 선택자로 {len(product_list)}개 상품 발견")
-                    
-                    # 상품 요소가 실제 내용을 포함하는지 검증
-                    valid_products = []
-                    for p in product_list:
-                        # 상품 링크나 이미지가 있는지 확인
-                        has_link = p.select("a[href]")
-                        has_image = p.select("img")
-                        if has_link or has_image:
-                            valid_products.append(p)
-                    
-                    print(f"[DEBUG] 유효한 상품 요소: {len(valid_products)}개")
-                    
-                    # 유효한 상품이 없으면 fallback 선택자 시도
-                    if len(valid_products) == 0:
-                        print(f"[FALLBACK] 기본 선택자로 유효한 상품을 찾지 못함, fallback 시도...")
-                        fallback_selectors = [
-                            "div[class*='item'], div[class*='product'], div[class*='goods']",
-                            "li[class*='item'], li[class*='product'], li[class*='goods']",
-                            "article, .product-item, .goods-item",
-                            "div:has(a[href*='product']), div:has(a[href*='detail'])"
-                        ]
-                        
-                        for fallback_selector in fallback_selectors:
-                            try:
-                                fallback_list = soup.select(fallback_selector)
-                                print(f"[FALLBACK] {fallback_selector}: {len(fallback_list)}개 발견")
-                                
-                                valid_fallback = []
-                                for p in fallback_list:
-                                    has_link = p.select("a[href]")
-                                    has_image = p.select("img")
-                                    if has_link or has_image:
-                                        valid_fallback.append(p)
-                                
-                                if len(valid_fallback) > 0:
-                                    print(f"[FALLBACK] {fallback_selector}로 {len(valid_fallback)}개 유효한 상품 발견")
-                                    product_list = valid_fallback
-                                    break
-                            except Exception as e:
-                                print(f"[FALLBACK] {fallback_selector} 실패: {e}")
-                    else:
-                        product_list = valid_products
-                        
-                except Exception as e:
-                    print(f"[ERROR] 상품리스트 선택자 오류: {e}")
-                    product_list = []
-                
-                # 중복 제거
-                seen_elements = set()
-                unique_product_list = []
-                for product in product_list:
-                    element_id = id(product)
-                    if element_id not in seen_elements:
-                        seen_elements.add(element_id)
-                        unique_product_list.append(product)
-                
-                product_list = unique_product_list
-                
-                # 고유한 상품 링크만 추출하여 중복 제거
-                unique_products = {}
-                for product in product_list:
-                    try:
-                        # 범용 상품링크 탐지 (여러 패턴 시도)
-                        link_element = None
-                        link = None
-                        
-                        # 1차 시도: perfect_result의 선택자
-                        try:
-                            link_element = product.select_one(selectors["상품링크"])
-                            if link_element and 'href' in link_element.attrs:
-                                link = link_element['href']
-                        except:
-                            pass
-                        
-                        # 1.5차 시도: Playwright 동적 탐지
-                        if not link:
-                            try:
-                                print(f"[DYNAMIC] 동적 상품링크 패턴 탐지 시작...")
-                                # Playwright로 실시간 href 패턴 분석
-                                pattern_stats = page.evaluate("""
-                                    () => {
-                                        const allLinks = Array.from(document.querySelectorAll('a[href]'));
-                                        const patterns = {};
-                                        
-                                        allLinks.forEach(link => {
-                                            const href = link.href;
-                                            if (href && href.length > 10) {
-                                                // 상품페이지로 보이는 패턴들 수집
-                                                if (href.includes('product') || href.includes('detail') || 
-                                                    href.includes('.html') || href.includes('item')) {
-                                                    
-                                                    // 패턴 생성
-                                                    let pattern = '';
-                                                    if (href.includes('/product/')) pattern = 'a[href*="/product/"]';
-                                                    else if (href.includes('product_no=')) pattern = 'a[href*="product_no="]';
-                                                    else if (href.includes('detail.html')) pattern = 'a[href*="detail.html"]';
-                                                    else if (href.includes('/detail/')) pattern = 'a[href*="/detail/"]';
-                                                    else if (href.includes('.html')) pattern = 'a[href*=".html"]';
-                                                    else pattern = 'a[href*="product"]';
-                                                    
-                                                    patterns[pattern] = (patterns[pattern] || 0) + 1;
-                                                }
-                                            }
-                                        });
-                                        
-                                        // 빈도순으로 정렬하여 반환
-                                        return Object.entries(patterns)
-                                            .sort((a, b) => b[1] - a[1])
-                                            .map(([pattern, count]) => ({pattern, count}));
-                                    }
-                                """)
-                                
-                                if pattern_stats and len(pattern_stats) > 0:
-                                    # 가장 빈도 높은 패턴 사용
-                                    best_pattern = pattern_stats[0]['pattern']
-                                    pattern_count = pattern_stats[0]['count']
-                                    
-                                    print(f"[DYNAMIC] 최적 패턴 발견: {best_pattern} ({pattern_count}개)")
-                                    
-                                    # 발견된 패턴으로 링크 추출 시도
-                                    try:
-                                        links = product.select(best_pattern)
-                                        for link_elem in links:
-                                            href = link_elem.get('href', '')
-                                            if href and any(pattern in href.lower() for pattern in ['product', 'detail', '.html']):
-                                                if not any(exclude in href.lower() for exclude in ['cart', 'wish', 'compare', 'review']):
-                                                    link = href
-                                                    print(f"[DYNAMIC] 동적 탐지 성공: {link[:50]}...")
-                                                    break
-                                    except Exception as pattern_e:
-                                        print(f"[DYNAMIC] 패턴 적용 실패: {pattern_e}")
-                                else:
-                                    print(f"[DYNAMIC] 유효한 패턴을 찾지 못함")
-                                    
-                            except Exception as e:
-                                print(f"[DYNAMIC] 동적 탐지 실패: {e}")
-                        
-                        
-                        # 2차 시도: 범용 상품 링크 패턴들
-                        if not link:
-                            fallback_selectors = [
-                                'a[href*="/product/"]',
-                                'a[href*="detail"]',
-                                'a[href*="product_no"]',
-                                'a[href*=".html"]',
-                                'a[href]'  # 마지막 수단
-                            ]
-                            
-                            for fallback_selector in fallback_selectors:
-                                try:
-                                    links = product.select(fallback_selector)
-                                    for link_elem in links:
-                                        href = link_elem.get('href', '')
-                                        # 상품 상세 페이지로 보이는 링크만 선택
-                                        if href and any(pattern in href.lower() for pattern in ['product', 'detail', '.html']):
-                                            if not any(exclude in href.lower() for exclude in ['cart', 'wish', 'compare', 'review']):
-                                                link = href
-                                                break
-                                    if link:
-                                        print(f"[FALLBACK] {fallback_selector}로 링크 발견: {link[:50]}...")
-                                        break
-                                except:
-                                    continue
-                        
-                        # 디버깅: 상품 요소 내 링크 현황 확인
-                        if not link:
-                            print(f"[DEBUG] 링크 추출 실패, 상품 요소 내 링크 확인...")
-                            all_links = product.select('a[href]')
-                            print(f"[DEBUG] 상품 요소 내 전체 링크 수: {len(all_links)}")
-                            for i, link_elem in enumerate(all_links[:5]):  # 최대 5개만 로그
-                                href = link_elem.get('href', '')
-                                print(f"[DEBUG] 링크 {i+1}: {href}")
-                            
-                            # 마지막 수단: 첫 번째 링크를 강제로 사용
-                            if len(all_links) > 0:
-                                first_link = all_links[0].get('href', '')
-                                if first_link:
-                                    link = first_link
-                                    print(f"[FORCE] 첫 번째 링크 강제 사용: {link[:50]}...")
-                        
-                        if link and link not in unique_products:
-                            unique_products[link] = product
-                    except Exception as e:
-                        print(f"[ERROR] 상품링크 추출 오류: {e}")
-                
-                print(f"[INFO] 페이지 {page_number}: {len(unique_products)}개 고유 상품 발견")
-                
-                if len(unique_products) == 0:
-                    print("[WARNING] 상품이 없습니다. 다음 페이지로 이동합니다.")
-                    continue
-
-                for product_link_partial, product in unique_products.items():
-                    print(f"[DEBUG] 상품 처리 시작: {product_link_partial}")
-                    # 상품 링크 처리 (이미 unique_products에서 추출됨)
-                    product_link = product_link_partial
-                    if not product_link.startswith('http'):
-                        product_link = base_url + product_link
-
-                    # 중복 링크 방지 (조용히 처리)
-                    if product_link in visited_links:
-                        continue
-                    visited_links.add(product_link)
-
-                    # 상품페이지 이동
-                    try:
-                        page.goto(product_link)
-                        page.wait_for_timeout(2000)
-                        # 상품페이지에서 스크롤을 아래로 내려서 상세페이지 이미지 로드
-                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        page.wait_for_timeout(1000)
-                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        page.wait_for_timeout(2000)
-                        product_soup = bs(page.content(), 'html.parser')
-                    except Exception as e:
-                        logging.error(f"상품 페이지 이동 중 오류 발생: {e}")
-                        print(f"[ERROR] 상품 페이지 이동 중 오류: {e}")
-                        continue
-
-                    # 상품명 추출 (개별 상품 페이지에서) - og:title 우선 사용
-                    product_name = "상품명을 찾을 수 없습니다."
-                    try:
-                        # 1. 먼저 og:title 메타태그에서 상품명 추출 시도
-                        og_title_element = product_soup.select_one('meta[property="og:title"]')
-                        if og_title_element and og_title_element.get('content'):
-                            og_title = og_title_element.get('content').strip()
-                            print(f"[DEBUG] og:title 메타태그에서 상품명 발견: '{og_title}'")
-                            # og:title에서 추출한 상품명이 유효한지 확인
-                            if og_title and len(og_title) > 2 and not any(exclude in og_title for exclude in ['카테고리', '전체보기', '메뉴', '로그인', '볼&골대', '볼&체커']):
-                                product_name = og_title
-                                print(f"[SUCCESS] og:title에서 상품명 추출 성공: '{product_name}'")
-                            else:
-                                print(f"[WARNING] og:title 내용이 유효하지 않음: '{og_title}'")
-                        
-                        # 2. og:title에서 추출 실패 시 기존 선택자 방식 사용
-                        if product_name == "상품명을 찾을 수 없습니다.":
-                            print(f"[FALLBACK] og:title 추출 실패, 기존 선택자 방식 사용")
-                            # perfect_result의 선택자로 모든 후보 요소 가져오기
-                            name_elements = product_soup.select(selectors["상품명"])
-                            print(f"[DEBUG] 상품명 선택자 '{selectors['상품명']}'로 {len(name_elements)}개 요소 발견")
-                            if name_elements:
-                                # 브랜드명 대괄호가 있는 상품명 우선 선택
-                                best_name = None
-                                for element in name_elements:
-                                    text = element.get_text(strip=True)
-                                    print(f"[DEBUG] 선택된 요소 텍스트: '{text}' (tag: {element.name}, class: {element.get('class', 'None')})")
-                                    if text:
-                                        # 제외 패턴 체크
-                                        exclude_patterns = [
-                                            '카테고리', '전체보기', '메뉴', '로그인', '회원가입',
-                                            '장바구니', '마이페이지', '고객센터', '공지사항', '이벤트',
-                                            '볼&골대', '볼&체커', '네트워크', '타임스탬프', '멀티스포츠',
-                                            '표현활동', '게임활동', 'nav', 'menu', 'button', 'btn'
-                                        ]
-                                        if any(pattern in text for pattern in exclude_patterns):
-                                            continue
-                                        
-                                        # 브랜드명 대괄호가 있으면 우선 선택
-                                        if '[' in text and ']' in text:
-                                            best_name = text
-                                            break
-                                        elif not best_name:  # 브랜드명이 없으면 첫 번째 유효한 텍스트 사용
-                                            best_name = text
-                                if best_name:
-                                    product_name = best_name.split(":", 1)[-1].strip()
-                                    print(f"[DEBUG] 최종 선택된 상품명: '{product_name}' (from: '{best_name}')")
-                                    print(f"[PRODUCT] {product_name[:50]}...")
-                                else:
-                                    print("[WARNING] 유효한 상품명을 찾을 수 없음")
-                            else:
-                                print(f"[WARNING] 선택자 '{selectors['상품명']}'로 상품명을 찾을 수 없음")
-                    except Exception as e:
-                        logging.error(f"[ERROR] 상품명 추출 중 오류 발생: 선택자 '{selectors['상품명']}' 사용 시 오류 {e}, 후속조치: 기본값으로 설정")
-                        print(f"[ERROR] 상품명 추출 중 오류: {e}")
-                        product_name = "상품명을 찾을 수 없습니다."
-                    
-                    # 상품명 유효성 및 중복 검증 (개선된 로직)
-                    if not is_valid_product_name(product_name):
-                        print(f"[SKIP] 유효하지 않은 상품명: {product_name}")
-                        logging.info(f"[SKIP] 유효하지 않은 상품명: {product_name}")
-                        continue
-                        
-                    if product_name in seen_product_names:
-                        logging.info(f"[SKIP] 상품명 중복 감지: {product_name}")
-                        print(f"[SKIP] 상품명 중복 감지 (카테고리명 오추출 가능성): {product_name}")
-                        continue
-                    
-                    # 유효한 상품명만 중복 검증 세트에 추가
-                    seen_product_names.add(product_name)
-                    print(f"[PRODUCT_VALID] 유효한 상품명 확인: {product_name[:50]}...")
-                    
-                    # 가격
-                    try:
-                        # perfect_result의 선택자만 사용
-                        price_element = product_soup.select_one(selectors["가격"])
-                        if price_element:
-                            price = price_element.get_text(strip=True)
-                            price_display = price.encode('ascii', 'ignore').decode('ascii')
-                            print(f"[DEBUG] 추출된 가격 텍스트: {price_display}")
-                            import re
-                            clean_price = re.sub(r'[^\d]', '', price)
-                            if clean_price and len(clean_price) >= 3:
-                                original_price = float(clean_price)
-                                adjusted_price = math.ceil((original_price * price_increase_rate) / 100) * 100
-                                if adjusted_price < minimum_price:
-                                    logging.info(f"[SKIP] minimum_price({minimum_price}) 미달: {adjusted_price}원")
-                                    print(f"[SKIP] minimum_price({minimum_price}) 미달: {adjusted_price}원")
-                                    continue
-                                else:
-                                    adjusted_price = int(adjusted_price)
-                                    logging.info(f"가격 추출 성공: {adjusted_price}")
-                                    print(f"[DEBUG] 가격 추출 성공: {adjusted_price}")
-                            else:
-                                adjusted_price = "가격 정보 없음"
-                                print(f"[DEBUG] 유효한 가격을 찾을 수 없음: {price_display}")
-                        else:
-                            adjusted_price = "가격 정보 없음"
-                            print(f"[DEBUG] 선택자 '{selectors['가격']}'로 가격 요소를 찾을 수 없음")
-                    except (AttributeError, ValueError) as e:
-                        adjusted_price = "가격 정보 없음"
-                        logging.error(f"[ERROR] 가격 추출 중 오류 발생: 선택자 '{selectors['가격']}' 사용 시 오류 {e}, 후속조치: '가격 정보 없음'으로 설정")
-                        print(f"[DEBUG] 가격 추출 실패: {e}")
-
-                    # 썸네일 이미지 주소 추출 및 저장
-                    try:
-                        thumbnail_element = product_soup.select_one(selectors["썸네일"])
-                        if thumbnail_element:
-                            thumbnail_url = thumbnail_element.get("data-original") or thumbnail_element.get("data-src") or thumbnail_element.get("src")
-                            if thumbnail_url:
-                                if thumbnail_url.startswith('//'):
-                                    thumbnail_url = 'https:' + thumbnail_url
-                                elif thumbnail_url.startswith('/'):
-                                    thumbnail_url = product_base_url + thumbnail_url
-                                elif not thumbnail_url.startswith('http'):
-                                    thumbnail_url = product_base_url + '/' + thumbnail_url
-                                logging.info(f"썸네일 추출 성공: {thumbnail_url}")
-                                print(f"[DEBUG] 썸네일 추출 성공: {thumbnail_url}")
-                            else:
-                                thumbnail_url = None
-                                print("[DEBUG] 썸네일 URL 없음")
-                        else:
-                            thumbnail_url = None
-                            logging.error(f"[ERROR] 썸네일 추출 실패: 선택자 '{selectors['썸네일']}'로 요소를 찾을 수 없음, 후속조치: 썸네일 없이 계속 진행")
-                            print("[DEBUG] 썸네일 추출 실패")
-                    except Exception as e:
-                        logging.error(f"[ERROR] 썸네일 이미지 추출 중 오류 발생: 선택자 '{selectors['썸네일']}' 사용 시 오류 {e}, 후속조치: 썸네일 없이 진행")
-                        thumbnail_url = None
-                        print(f"[DEBUG] 썸네일 추출 실패: {e}")
-
-                    # 썸네일 이미지 저장 및 새로운 캔버스에 편집
-                    try:
-                        if thumbnail_url:
-                            print(f"[DEBUG] 썸네일 이미지 다운로드 시도: {thumbnail_url}")
-                            temp_filename = f'{thumbnail_path}/{image_counter}_temp.jpg'
-                            urllib.request.urlretrieve(thumbnail_url, temp_filename)
-                            im = Image.open(temp_filename)
-                            im = im.resize((400, 400))
-                            image = Image.new("RGB", (600, 600), "white")
-                            gray_background = Image.new("RGB", (600, 100), (56, 56, 56))
-                            image.paste(gray_background, (0, 500))
-                            # 먼저 상품 이미지를 붙임
-                            image.paste(im, (100, 100))
-                            # 그 다음에 S2B REGISTERED 배지를 그림 (상품 이미지 위에 오도록)
-                            blue_background = Image.new("RGB", (120, 80), (0, 82, 204))  # S2B 파란색
-                            image.paste(blue_background, (480, 0))
-                            red_badge = Image.new("RGB", (120, 40), (255, 61, 70))
-                            image.paste(red_badge, (480, 80))
-                            draw = ImageDraw.Draw(image)
-                            font_path = "C:/Windows/Fonts/NanumGothicExtraBold.ttf"
-                            max_text_width = 520
-                            max_font_size = 150
-                            min_font_size = 30
-                            max_length = 13
-                            if len(product_name) > max_length:
-                                text1 = product_name[:max_length] + "..."
-                            else:
-                                text1 = product_name
-                            text1 = text1.replace("-", "")
-                            try:
-                                name_font = get_fitting_font(draw, text1, max_text_width, font_path, max_font_size, min_font_size)
-                                try:
-                                    bbox = draw.textbbox((0, 0), text1, font=name_font)
-                                    text_width = bbox[2] - bbox[0]
-                                    text_height = bbox[3] - bbox[1]
-                                except AttributeError:
-                                    text_width, text_height = draw.textsize(text1, font=name_font)
-                                x = (600 - text_width) // 2
-                                y = 500 + (100 - text_height) // 2
-                                print(f"[DEBUG] 폰트 적용 성공: {name_font.size}pt, 텍스트폭: {text_width}, x좌표: {x}")
-                            except Exception as e:
-                                print(f"[ERROR] 폰트 적용 오류: {e}")
-                                name_font = ImageFont.truetype(font_path, min_font_size)
-                                x = 10
-                                y = 510
-                            try:
-                                draw.text((x, y), text1, font=name_font, fill="white", stroke_fill="black", stroke_width=2)
-                                print(f"[DEBUG] draw.text 성공: '{text1}' (x={x}, y={y})")
-                            except Exception as e:
-                                print(f"[ERROR] draw.text 오류: {e}")
-                            badge_font_path = "C:/Windows/Fonts/arialbd.ttf"
-                            try:
-                                s2b_font = ImageFont.truetype(badge_font_path, 60)
-                                registered_font = ImageFont.truetype(badge_font_path, 16)
-                            except:
-                                try:
-                                    badge_font_path = "C:/Windows/Fonts/Arial.ttf"
-                                    s2b_font = ImageFont.truetype(badge_font_path, 60)
-                                    registered_font = ImageFont.truetype(badge_font_path, 16)
-                                except:
-                                    s2b_font = ImageFont.load_default()
-                                    registered_font = ImageFont.load_default()
-                            s2b_text = "S2B"
-                            try:
-                                bbox = draw.textbbox((0, 0), s2b_text, font=s2b_font)
-                                s2b_width = bbox[2] - bbox[0]
-                                s2b_height = bbox[3] - bbox[1]
-                            except AttributeError:
-                                s2b_width, s2b_height = draw.textsize(s2b_text, font=s2b_font)
-                            s2b_x = 480 + (120 - s2b_width) // 2
-                            s2b_y = 5
-                            draw.text((s2b_x, s2b_y), s2b_text, font=s2b_font, fill="white")
-                            reg_text = "REGISTERED"
-                            try:
-                                bbox = draw.textbbox((0, 0), reg_text, font=registered_font)
-                                reg_width = bbox[2] - bbox[0]
-                                reg_height = bbox[3] - bbox[1]
-                            except AttributeError:
-                                reg_width, reg_height = draw.textsize(reg_text, font=registered_font)
-                            reg_x = 480 + (120 - reg_width) // 2
-                            reg_y = 88
-                            draw.text((reg_x, reg_y), reg_text, font=registered_font, fill="white")
-                            try:
-                                image.save(f'{thumbnail_path}/{image_counter}_cr.jpg', quality=95, optimize=False)
-                                print(f"[DEBUG] 썸네일 저장 성공: {thumbnail_path}/{image_counter}_cr.jpg")
-                            except Exception as e:
-                                print(f"[ERROR] 썸네일 저장 오류: {e}")
-                            image.close()
-                            im.close()
-                            try:
-                                os.remove(temp_filename)
-                                print(f"[DEBUG] 임시 파일 삭제: {temp_filename}")
-                            except Exception as e:
-                                print(f"[WARNING] 임시 파일 삭제 실패: {e}")
-                        else:
-                            print("[WARNING] 썸네일 URL이 없어 이미지 생성 생략")
-                    except Exception as e:
-                        print(f"[ERROR] 썸네일 이미지 처리 중 오류: {e}")
-                        continue
-                    print(f"[DEBUG] 상품 처리 종료: {product_link_partial}")
-
-                    # 상세 페이지 이미지 저장 및 자르기 (Playwright DOM 기반, 간결화)
-                    try:
-                        # 1. Playwright로 스크롤 여러 번 내리기 (동적 로딩 대응)
-                        scroll_steps = [0, 0.25, 0.5, 0.75, 1.0]
-                        for step in scroll_steps:
-                            page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {step})")
-                            page.wait_for_timeout(500)
-
-                        # 2. 다층 상세페이지 선택자 전략으로 img 태그 추출
-                        img_elements = page.query_selector_all('img')
-                        # 썸네일 URL robust하게 추출
-                        thumbnail_element = product_soup.select_one(selectors["썸네일"])
-                        thumbnail_url = None
-                        if thumbnail_element:
-                            thumbnail_url = thumbnail_element.get("data-original") or thumbnail_element.get("data-src") or thumbnail_element.get("src")
-                            if thumbnail_url:
-                                thumbnail_url = urljoin(product_base_url, thumbnail_url)
-                        
-                        # 유효성 검사 함수 (final_analyzer_universal.py의 로직 활용)
-                        analyzer = FinalAnalyzer()
-                        detail_img_urls = []
-                        for img in img_elements:
-                            img_url = img.get_attribute('data-original') or img.get_attribute('data-src') or img.get_attribute('src')
-                            if not img_url:
-                                continue
-                            img_url = urljoin(product_base_url, img_url)
-                            # 유효성 검사, 썸네일/중복 방지, 최대 10개
-                            if (analyzer._is_valid_detail_image(img_url)
-                                and img_url not in detail_img_urls
-                                and (not thumbnail_url or img_url != thumbnail_url)):
-                                detail_img_urls.append(img_url)
-                            if len(detail_img_urls) >= 10:
-                                break
-                        if detail_img_urls:
-                            logging.info(f"상세페이지 추출 성공: {len(detail_img_urls)}개")
-                            print(f"[DEBUG] 상세페이지 추출 성공: {len(detail_img_urls)}개")
-                        else:
-                            logging.error(f"[ERROR] 상세페이지 이미지 추출 실패: 선택자 '{selectors['상세페이지']}'로 유효한 이미지를 찾을 수 없음, 후속조치: 상세이미지 없이 계속 진행")
-                            print("[DEBUG] 상세페이지 추출 실패")
-                        # 3. 이미지 합치기 및 자르기 (성능 최적화된 병렬 다운로드)
-                        combined_image = None
-                        
-                        # 병렬로 이미지 크기 사전 검증
-                        if detail_img_urls:
-                            print(f"[PERF] 상세 이미지 병렬 크기 검증 시작: {len(detail_img_urls)}개")
-                            size_results = download_optimizer.check_image_size_parallel(detail_img_urls)
-                            
-                            # 유효한 이미지만 필터링
-                            valid_detail_urls = [url for url, (is_valid, size) in size_results.items() if is_valid]
-                            print(f"[PERF] 병렬 검증 결과: {len(valid_detail_urls)}개 유효 이미지")
-                        else:
-                            valid_detail_urls = detail_img_urls
-                        
-                        for img_url in valid_detail_urls:
-                            img_path = f'{base_path}/detail_{image_counter}.jpg'
-                            
-                            # 최적화된 다운로드 사용
-                            if download_optimizer.download_image_optimized(img_url, img_path):
-                                jm = Image.open(img_path).convert("RGB")
-                                if combined_image is None:
-                                    combined_image = jm
-                                else:
-                                    combined_width = max(combined_image.width, jm.width)
-                                    combined_height = combined_image.height + jm.height
-                                    new_combined_image = Image.new("RGB", (combined_width, combined_height), "white")
-                                    new_combined_image.paste(combined_image, (0, 0))
-                                    new_combined_image.paste(jm, (0, combined_image.height))
-                                    combined_image = new_combined_image
-                            else:
-                                print(f"[ERROR] 이미지 다운로드 실패, 건너뜀: {img_url}")
-                        if combined_image is not None:
-                            width, height = combined_image.size
-                            current_image_num = image_counter
-                            slice_height = height // 10
-                            for i in range(10):
-                                crop_area = (0, slice_height * i, width, slice_height * (i + 1))
-                                cropped_img = combined_image.crop(crop_area)
-                                cropped_img.save(f'{output_path}/{current_image_num:03}_{i + 1:03}.jpg')
-                            combined_image.close()
-                    except Exception as e:
-                        print(f"오류 발생: {e}")
-                        logging.error(f"[ERROR] 상세페이지 이미지 추출 중 오류 발생: 선택자 '{selectors['상세페이지']}' 사용 시 오류 {e}, 후속조치: 빈 상세이미지 목록으로 진행")
-                        print(f"[DEBUG] 상세페이지 추출 실패: {e}")
-
-                    # 상세설명 텍스트 추출 (키드짐 특수 요구사항)
-                    extracted_text_content = ""
-                    try:
-                        print("[DEBUG] 상세설명 텍스트 추출 시작")
-                        
-                        # selectors에서 상세설명텍스트 선택자 가져오기
-                        text_selector = selectors.get("상세설명텍스트", "")
-                        if text_selector:
-                            print(f"[DEBUG] 텍스트 선택자 사용: {text_selector}")
-                            
-                            # Playwright page 객체를 통해 텍스트 추출 (동기식)
-                            try:
-                                # 첫 번째 시도: HTML 서식 유지하여 추출
-                                text_elements = page.query_selector_all(text_selector)
-                                text_blocks = []
-                                
-                                for element in text_elements:
-                                    # innerHTML으로 HTML 서식 유지
-                                    html_content = element.inner_html()
-                                    if html_content and html_content.strip():
-                                        # 기본적인 정제: 스크립트, 스타일 태그 제거
-                                        cleaned_html = re.sub(r'<script.*?</script>', '', html_content, flags=re.DOTALL)
-                                        cleaned_html = re.sub(r'<style.*?</style>', '', cleaned_html, flags=re.DOTALL)
-                                        
-                                        if len(cleaned_html.strip()) > 20:  # 의미있는 내용만
-                                            text_blocks.append(cleaned_html.strip())
-                                            print(f"[DEBUG] HTML 텍스트 블록 추가: {len(cleaned_html)}자")
-                                
-                                if text_blocks:
-                                    # 텍스트 블록들을 하나로 합치기
-                                    combined_text = '\n'.join(text_blocks)
-                                    
-                                    # 최대 길이 제한 (3000자)
-                                    if len(combined_text) > 3000:
-                                        combined_text = combined_text[:3000] + '...'
-                                    
-                                    extracted_text_content = combined_text
-                                    print(f"[DEBUG] 최종 텍스트 추출 성공: {len(extracted_text_content)}자")
-                                else:
-                                    print("[DEBUG] 유효한 텍스트 블록을 찾을 수 없음")
-                                    
-                            except Exception as e:
-                                print(f"[DEBUG] Playwright 텍스트 추출 실패: {e}")
-                                # BeautifulSoup으로 fallback
-                                try:
-                                    text_elements = product_soup.select(text_selector)
-                                    text_blocks = []
-                                    
-                                    for element in text_elements:
-                                        text_content = element.get_text(separator=' ', strip=True)
-                                        if text_content and len(text_content) > 20:
-                                            text_blocks.append(text_content)
-                                            print(f"[DEBUG] Fallback 텍스트 블록 추가: {len(text_content)}자")
-                                    
-                                    if text_blocks:
-                                        combined_text = '\n\n'.join(text_blocks)
-                                        if len(combined_text) > 3000:
-                                            combined_text = combined_text[:3000] + '...'
-                                        extracted_text_content = combined_text
-                                        print(f"[DEBUG] Fallback 텍스트 추출 성공: {len(extracted_text_content)}자")
-                                except Exception as fallback_e:
-                                    print(f"[DEBUG] Fallback 텍스트 추출도 실패: {fallback_e}")
-                        else:
-                            print("[DEBUG] 상세설명텍스트 선택자가 없음")
-                            
-                    except Exception as e:
-                        print(f"[ERROR] 상세설명 텍스트 추출 실패: {e}")
-                        extracted_text_content = ""
-
-                    # 옵션 추출 및 추가금액 파싱
-                    try:
-                        options = []
-                        option_tags = product_soup.select(selectors["선택옵션"] + ' option')
-
-                        for option_tag in option_tags:
-                            option_value = option_tag.get_text(strip=True)
-                            # 유효한 옵션인지 확인
-                            if option_value and is_valid_option(option_value):
-                                # 화폐 기호 제거
-                                option_value = option_value.replace('₩', '').strip()
-                                option_name = option_value.split('(')[0].strip()
-                                price_change = "0"
-                                
-                                # 추가 금액이 존재하는 경우 (예: (+25,000원) 또는 (-208,600원))
-                                if '(' in option_value and ')' in option_value:
-                                    price_info = option_value.split('(')[1].split(')')[0].strip()
-                                    if '+' in price_info:
-                                        # 양수 추가 금액일 경우 '+' 기호 제거
-                                        price_change = price_info.replace(',', '').replace('원', '').replace('+', '').strip()
-                                    elif '-' in price_info:
-                                        # 음수 추가 금액일 경우 '-' 기호 유지
-                                        price_change = price_info.replace(',', '').replace('원', '').strip()
-
-                                options.append((option_name, price_change))
-
-                        if not options:
-                            options.append(("없음", "0"))
-                        logging.info(f"옵션 추출 성공: {options}")
-                        print(f"[DEBUG] 옵션 추출 성공: {options}")
-
-                    except Exception as e:
-                        logging.error(f"[ERROR] 옵션 추출 중 오류 발생: 선택자 '{selectors['선택옵션']}' 사용 시 오류 {e}, 후속조치: 빈 옵션으로 계속 진행")
-                        options = []
-                        print(f"[DEBUG] 옵션 추출 실패: {e}")
-
-                    # 옵션 처리
-                    try:
-                        option_string = []  # 옵션 리스트 초기화
-
-                        for option_name, price_change in options:
-                            formatted_option = f"{option_name}=={price_change}=10000=0=0=0="
-                            option_string.append(formatted_option)
-
-                        if not option_string:
-                            option_string.append("없음")
-
-                        formatted_options = "\n".join(option_string)
-                        option_string = "[필수선택]\n" + formatted_options
-
-                        # 조건에 따라 최종 옵션 문자열 출력
-                        if option_string.count("10000") == 1:
-                            option_string = ""
-
-                        # print("옵션 문자열:\n", option_string)
-
-                    except Exception as e:
-                        logging.error(f"[ERROR] 옵션 처리 중 오류 발생: 옵션 데이터 포맷팅 시 오류 {e}, 후속조치: 빈 옵션 문자열로 계속 진행")
-                        option_string = ""
-
-                    # 옵션 상품 가격 검증 (가이드라인: 복잡한 옵션 구조 검증)
-                    try:
-                        # 옵션이 있는 상품인지 확인
-                        has_valid_options = False
-                        if 'options' in locals() and options:
-                            # '없음' 옵션만 있는 경우는 옵션 없는 상품으로 간주
-                            has_valid_options = any(option_name != '없음' for option_name, _ in options)
-                        
-                        # 옵션 상품이면서 가격이 비정상적으로 낮은 경우 검증
-                        if has_valid_options and isinstance(adjusted_price, (int, float)) and adjusted_price < 1000:
-                            logging.info(f"[PRICE_OPTION_ERROR] 옵션 상품 가격 검증 실패: {adjusted_price}원 (옵션 {len(options)}개)")
-                            print(f"[PRICE_OPTION_ERROR] 옵션 상품 가격 검증 실패: {adjusted_price}원 (옵션 {len(options)}개)")
-                            continue
-                    except Exception as e:
-                        logging.error(f"옵션 상품 가격 검증 중 오류: {e}")
-                        # 검증 오류는 전체 중단하지 않고 계속 진행
-
-                    # 추가 코드 시작
-                    try:
-                        product_code = str(now)[3:4] + str(now)[5:7] + str(now)[8:10] + code + str(image_counter)
-                        empty_str = ""
-                        brand = brandname
-                        manufacturer = brandname
-                        origin = "국내=서울=강남구"
-                        attributes = code + tdate
-                        payment_method = "선결제"
-                        shipping_fee = "3500"
-                        purchase_quantity = "0"
-                        tax_status = "y"
-                        inventory = "9000"
-                        thumbnail_url_final = f"http://ai.esmplus.com/tstkimtt/{tdate}{code}/cr/{image_counter}_cr.jpg"
-                        option_type = "" if option_string == "" else "SM"
-
-                        description = "<center> <img src='http://gi.esmplus.com/tstkimtt/head.jpg' /><br>"
-                        for i in range(1, 11):
-                            description += f"<img src='http://ai.esmplus.com/tstkimtt/{tdate}{code}/output/{image_counter:03}_{i:03}.jpg' /><br />"
-                        
-                        # 상세설명 텍스트 블록 삽입 (상세 이미지 다음, 배송 이미지 이전)
-                        if extracted_text_content and extracted_text_content.strip():
-                            description += "<div style='padding:15px; text-align:left; background-color:#f9f9f9; margin:10px; border-radius:5px; font-family:Arial,sans-serif; line-height:1.6;'>"
-                            description += extracted_text_content
-                            description += "</div><br>"
-                            print(f"[DEBUG] 텍스트 블록이 description에 추가됨: {len(extracted_text_content)}자")
-                        else:
-                            print("[DEBUG] 추가할 텍스트 내용이 없음")
-                        
-                        description += "<img src='http://gi.esmplus.com/tstkimtt/deliver.jpg' /></center>"
-
-                        coupon = "쿠폰"
-                        category_code = "c"
-                        weight = " "
-                        detailed_description = "상세설명일괄참조"
-                        free_gift = "N"
-
-                        # 엑셀 헤더 순서에 맞춰 데이터 리스트를 정확히 매핑
-                        sheet.append([
-                            product_code,           # 업체상품코드
-                            "",                    # 모델명
-                            brand,                 # 브랜드
-                            manufacturer,          # 제조사
-                            origin,                # 원산지
-                            product_name,          # 상품명
-                            "",                    # 홍보문구
-                            "",                    # 요약상품명
-                            category,              # 카테고리코드
-                            attributes,            # 사용자분류명
-                            "",                    # 한줄메모
-                            "",                    # 시중가
-                            "",                    # 원가
-                            "",                    # 표준공급가
-                            adjusted_price,        # 판매가
-                            payment_method,        # 배송방법
-                            shipping_fee,          # 배송비
-                            purchase_quantity,     # 구매수량
-                            tax_status,            # 과세여부
-                            inventory,             # 판매수량
-                            thumbnail_url_final,   # 이미지1URL
-                            thumbnail_url_final,   # 이미지2URL
-                            "",                    # 이미지3URL
-                            "",                    # 이미지4URL
-                            "",                    # GIF생성
-                            "",                    # 이미지6URL
-                            "",                    # 이미지7URL
-                            "",                    # 이미지8URL
-                            "",                    # 이미지9URL
-                            "",                    # 이미지10URL
-                            "",                    # 추가정보입력사항
-                            option_type,           # 옵션구분(기존 옵션타입)
-                            option_string,         # 선택옵션(기존 옵션구분)
-                            "",                    # 입력형옵션
-                            "",                    # 추가구매옵션
-                            description,           # 상세설명
-                            "",                    # 추가상세설명
-                            "",                    # 광고/홍보
-                            "",                    # 제조일자
-                            "",                    # 유효일자
-                            coupon,                # 사은품내용(쿠폰)
-                            "",                    # 키워드
-                            "C",                   # 인증구분(기존 인증정보)
-                            "",                    # 인증정보
-                            "",                    # 거래처
-                            "",                    # 영어상품명
-                            "",                    # 중국어상품명
-                            "",                    # 일본어상품명
-                            "",                    # 영어상세설명
-                            "",                    # 중국어상세설명
-                            "",                    # 일본어상세설명
-                            weight,                # 상품무게
-                            "",                    # 영어키워드
-                            "",                    # 중국어키워드
-                            "",                    # 일본어키워드
-                            "",                    # 생산지국가
-                            "",                    # 전세계배송코드
-                            "",                    # 사이즈
-                            "",                    # 포장방법
-                            "25",                  # 표준산업코드(상품상세코드)
-                            "N",                   # 미성년자구매(사은품여부)
-                            "",                    # 상품상세코드(빈 값)
-                            detailed_description,  # 상품상세1
-                            detailed_description,  # 상품상세2
-                            detailed_description,  # 상품상세3
-                            detailed_description,  # 상품상세4
-                            detailed_description,  # 상품상세5
-                            detailed_description,  # 상품상세6
-                            detailed_description,  # 상품상세7
-                            detailed_description,  # 상품상세8
-                            detailed_description,  # 상품상세9
-                            detailed_description,  # 상품상세10
-                            detailed_description,  # 상품상세11
-                            detailed_description,  # 상품상세12
-                            detailed_description,  # 상품상세13
-                            detailed_description,  # 상품상세14
-                            detailed_description,  # 상품상세15
-                            detailed_description,  # 상품상세16
-                            detailed_description,  # 상품상세17
-                            detailed_description,  # 상품상세18
-                            detailed_description,  # 상품상세19
-                            detailed_description,  # 상품상세20
-                            detailed_description,  # 상품상세21
-                            detailed_description,  # 상품상세22
-                            detailed_description,  # 상품상세23
-                            detailed_description,  # 상품상세24
-                            detailed_description,  # 상품상세25
-                            thumbnail_url          # 상품상세26(마지막에 이미지 URL)
-                        ])
-
-                        product_infos.append({
-                            'image_counter': image_counter,
-                            'product_name': product_name,
-                            'adjusted_price': adjusted_price,
-                            'product_link': product_link,
-                            'thumbnail_url': thumbnail_url
-                        })
-                        
-                        # 부분 성공 검증 및 로깅
-                        partial_issues = []
-                        if not thumbnail_url:
-                            partial_issues.append("썸네일 없음")
-                        if not detail_img_urls:
-                            partial_issues.append("상세이미지 없음")
-                        if adjusted_price == "가격 정보 없음":
-                            partial_issues.append("가격 정보 없음")
-                        
-                        if partial_issues:
-                            logging.info(f"[PARTIAL SUCCESS] 상품 부분 성공: {', '.join(partial_issues)} 문제 있음, 후속조치: 가능한 데이터로 계속 진행")
-                            print(f"[PARTIAL SUCCESS] 상품 부분 성공: {', '.join(partial_issues)}")
-                        
-                        print(f"[INFO] 저장: {image_counter}_cr.jpg | {product_name} | {adjusted_price} | {product_link}")
-                        image_counter += 1  # 다음 상품을 위해 카운터 증가
-
-                        # 상품 개수 제한 (테스트 모드)
-                        if TEST_MODE and image_counter > TEST_PRODUCT_COUNT:
-                            print(f"[INFO] TEST_MODE: {TEST_PRODUCT_COUNT}개 상품만 추출 후 중단합니다.")
-                            break
-                    except Exception as e:
-                        logging.error(f"상품 데이터 추가 중 오류 발생: {e}")
-                        continue
-
-            except Exception as e:
-                logging.error(f"페이지 처리 중 오류 발생: {e}")
-                continue
-
+if __name__ == "__main__":
+    """
+    범용 쇼핑몰 크롤러 - JSON 의존성 제거 버전
+    
+    주요 특징:
+    - FinalAnalyzer 상속으로 실시간 선택자 탐지
+    - JSON 파일 없이 선택자 자동 탐지 및 크롤링
+    - 기존 결과물 형식 100% 보존 (엑셀 헤더, 이미지 규격)
+    """
+    print("키드짐 B2B 크롤러 시작! 작업을 시작할게요.. 잠깐만 기다려주세요*^.^*")
+    
+    try:
+        # 비동기 크롤링 실행
+        asyncio.run(ProductCrawler().run_full_crawling())
+        print("[SUCCESS] 크롤링 작업이 성공적으로 완료되었습니다!")
+        
+    except KeyboardInterrupt:
+        print("\n[STOP] 사용자에 의해 작업이 중단되었습니다.")
     except Exception as e:
-        logging.error(f"오류 발생: {e}")
-
-    finally:
-        # 성능 최적화 객체 정리
-        download_optimizer.close()
-        print("[PERF] 이미지 다운로드 최적화 시스템 정리 완료")
-        browser.close()
-
-# 현재 시간을 출력
-# print(now)  # 주석 처리
-
-# 엑셀 파일 저장
-try:
-    wb.save(f'C:/Users/ME/Pictures/{tdate}{code}.xlsx')
-    print("크롤링 성공")
-except Exception as e:
-    logging.error(f"엑셀 파일 저장 중 오류 발생: {e}")
-
-# 작업에 총 몇 초가 걸렸는지 출력
-end_time = time.time()
-print("The Job Took " + str(end_time - start_time) + " seconds.")
+        print(f"[ERROR] 크롤링 중 오류 발생: {e}")
+        print("[INFO] 자세한 오류 내용은 로그를 확인해주세요.")

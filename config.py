@@ -12,13 +12,13 @@ import urllib.request
 import math
 
 # 테스트할 상품 개수 (선택자 검증용)
-TEST_PRODUCTS = 3
+TEST_PRODUCTS = 10
 
 # ===================== 사용자 편의 테스트 모드 =====================
 # 테스트 모드가 True면 상품을 TEST_PRODUCT_COUNT개만 추출하고, 엑셀도 정상 생성됨
 # False면 start_page ~ end_page 전체 페이지 크롤링
 TEST_MODE = True  # 테스트 모드 (True: 일부 상품만 추출, False: 전체 페이지 크롤링)
-TEST_PRODUCT_COUNT = 10  # 테스트 모드에서 추출할 상품 개수
+TEST_PRODUCT_COUNT = 2  # 테스트 모드에서 추출할 상품 개수
 
 # ===================== 기본 설정 =====================
 code = "kidgym"  # 브랜드영문
@@ -27,7 +27,7 @@ category = "39130000"  # 카테고리 구분 (학교체육:39130000)
 price_increase_rate = 1.05  # 가격 인상률 (예: 10% 인상 1.1)
 start_page = 1  # 시작 페이지 번호
 end_page = 9 # 끝 페이지 번호
-minimum_price = 20000  # 최소 가격 설정
+minimum_price = 100  # 최소 가격 설정 (테스트용)
 use_login = False  # 로그인 사용 여부
 login_url = 'https://kidgymb2b.co.kr/member/login.html'  # 로그인 페이지 URL
 catalog_url_template = 'https://kidgymb2b.co.kr/product/list.html?cate_no=223&page={page}'  # 카탈로그 페이지 URL 템플릿

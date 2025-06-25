@@ -365,26 +365,14 @@ class FinalAnalyzer:
             else:
                 print(f"[FAIL] 상품명 추출 실패")
             
-            # 가격
+            # 가격 (원본 텍스트 그대로 저장)
             if self.selectors.get('가격'):
                 try:
                     element = await page.query_selector(self.selectors['가격'])
                     if element:
                         price_text = (await element.text_content()).strip()
-                        price_match = re.search(r'(\d{1,3}(?:,\d{3})*)', price_text)
-                        if price_match:
-                            data['가격'] = price_match.group(1) + '원'
-                        else:
-                            numbers = re.findall(r'\d+', price_text.replace(',', ''))
-                            if numbers:
-                                longest_num = max(numbers, key=len)
-                                if len(longest_num) >= 3:
-                                    formatted_price = '{:,}'.format(int(longest_num))
-                                    data['가격'] = formatted_price + '원'
-                                else:
-                                    data['가격'] = price_text
-                            else:
-                                data['가격'] = price_text
+                        # 원본 텍스트 그대로 저장 (나중에 main.py에서 정리)
+                        data['가격'] = price_text if price_text else None
                     else:
                         data['가격'] = None
                 except:
@@ -447,13 +435,19 @@ class FinalAnalyzer:
                     scroll_steps = [0, 0.25, 0.5, 0.75, 1.0]
                     for step in scroll_steps:
                         await page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {step})")
-                        await page.wait_for_timeout(500)
+                        await page.wait_for_timeout(800)  # 키드짐 특화: 대기시간 증가 (lazy loading 대응)
                     
-                    # 다양한 선택자 시도
+                    # 이미지 로드 완료 대기 추가
+                    await page.wait_for_timeout(1000)
+                    
+                    # 키드짐 특화 선택자를 우선순위로 배치
                     selectors_to_try = [
+                        '.goods_description img',  # 키드짐 상세 설명 영역
+                        '.product_detail img',     # 상품 상세 영역  
+                        'div[class*="prd"] img',   # prd 관련 클래스
+                        '.goods_info img',         # 상품 정보 영역
                         self.selectors['상세페이지'],  # SmartDetector가 찾은 선택자
                         '#prdDetail img',
-                        '.goods_description img',
                         '.detail img',
                         '.detail-content img',
                         '.product-detail img',
@@ -487,9 +481,9 @@ class FinalAnalyzer:
                                     # 썸네일 URL과 동일한지 확인
                                     thumbnail_url = data.get('썸네일', '')
                                     
-                                    # 유효성 검사 및 중복 체크
+                                    # 유효성 검사 및 중복 체크 (Playwright fallback 지원)
                                     if (normalized_url and 
-                                        self._is_valid_detail_image(normalized_url) and 
+                                        await self._is_valid_detail_image(normalized_url, page) and 
                                         normalized_url not in detail_images and
                                         normalized_url != thumbnail_url):
                                         detail_images.append(normalized_url)
@@ -502,7 +496,9 @@ class FinalAnalyzer:
                                 
                         except Exception as e:
                             print(f"[DEBUG] {selector} 선택자 오류: {e}")
-                            continue
+                        
+                        # 키드짐 특화: 각 선택자 시도 간격 증가 (DOM 로딩 대기)
+                        await page.wait_for_timeout(300)
                     
                     data['상세페이지'] = detail_images[:10]
                     print(f"[DEBUG] 최종 상세페이지 이미지: {len(data['상세페이지'])}개")
@@ -572,8 +568,40 @@ class FinalAnalyzer:
             from urllib.parse import urljoin
             return urljoin(base_url, url)
         
-    def _is_valid_detail_image(self, url):
-        """기준서에 따른 유효한 상세 이미지 검증 (가로 660px 이상, 파일 크기, 의미 필터링)"""
+    async def _get_image_info_via_playwright(self, page, url):
+        """Playwright를 통한 이미지 정보 추출 (403 오류 대응)"""
+        try:
+            # 브라우저에서 이미지 정보 추출
+            result = await page.evaluate(f"""
+                async () => {{
+                    try {{
+                        const img = new Image();
+                        return new Promise((resolve, reject) => {{
+                            img.onload = () => {{
+                                resolve({{
+                                    width: img.naturalWidth,
+                                    height: img.naturalHeight,
+                                    src: img.src
+                                }});
+                            }};
+                            img.onerror = () => reject(new Error('Image load failed'));
+                            img.src = '{url}';
+                            
+                            // 5초 타임아웃
+                            setTimeout(() => reject(new Error('Timeout')), 5000);
+                        }});
+                    }} catch (e) {{
+                        return null;
+                    }}
+                }}
+            """)
+            return result
+        except Exception as e:
+            print(f"[FALLBACK] Playwright 이미지 정보 추출 실패: {e}")
+            return None
+
+    async def _is_valid_detail_image(self, url, page=None):
+        """키드짐 특화: 유효한 상세 이미지 검증 (가로 300px 이상, 파일 크기 5KB 이상, 의미 필터링 완화, Playwright fallback 지원)"""
         if not url:
             return False
         
@@ -583,7 +611,7 @@ class FinalAnalyzer:
         exclude_patterns = [
             'logo', 'icon', 'btn', 'button', 'menu', 'nav', 
             'arrow', 'quick', 'zzim', 'wishlist',
-            'banner', 'common', 'header', 'footer',
+            'banner', 'header', 'footer',  # 'common' 제거 (키드짐 특화 완화)
             'popup', 'close', 'search', 'cart',
             'sns', 'facebook', 'twitter', 'kakao',
             'top_btn', 'scroll', 'floating',
@@ -599,11 +627,17 @@ class FinalAnalyzer:
             'event_', 'promotion_', 'ad_', 'banner_'
         ]
         
-        # 특정 패턴이 포함된 경우 무조건 제외
-        for pattern in exclude_patterns:
-            if pattern in url_lower:
-                print(f"[FILTER] 패턴 '{pattern}' 발견으로 이미지 제외: {url}")
-                return False
+        # 키드짐 특화: 상품 이미지 경로 우대 (필터링 우선 통과)
+        is_product_image = '/web/product/' in url_lower or '/product/' in url_lower
+        
+        # 특정 패턴이 포함된 경우 제외 (단, 상품 이미지 경로는 예외)
+        if not is_product_image:
+            for pattern in exclude_patterns:
+                if pattern in url_lower:
+                    print(f"[FILTER] 패턴 '{pattern}' 발견으로 이미지 제외: {url}")
+                    return False
+        else:
+            print(f"[PRIORITY] 키드짐 상품 이미지 경로 감지, 우선 검증: {url}")
         
         # 2단계: 이미지 파일 형식 확인
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
@@ -634,6 +668,18 @@ class FinalAnalyzer:
             # 이미지 헤더만 다운로드하여 크기 확인 (성능 최적화)
             response = requests.head(url, headers=headers, timeout=10)
             if response.status_code != 200:
+                # HTTP 403 등의 오류 발생 시 Playwright fallback 시도
+                if response.status_code == 403 and page:
+                    print(f"[FALLBACK] HTTP 403 오류, Playwright로 재시도: {url}")
+                    try:
+                        # Playwright를 통한 이미지 정보 추출
+                        image_info = await self._get_image_info_via_playwright(page, url)
+                        if image_info and image_info.get('width', 0) >= 300:
+                            print(f"[FALLBACK] Playwright로 성공 ({image_info['width']}x{image_info['height']}): {url}")
+                            return True
+                    except Exception as e:
+                        print(f"[FALLBACK] Playwright 실패: {url} - {e}")
+                
                 print(f"[FILTER] HTTP 응답 오류 ({response.status_code})으로 이미지 제외: {url}")
                 return False
             
@@ -641,8 +687,8 @@ class FinalAnalyzer:
             content_length = response.headers.get('content-length')
             if content_length:
                 file_size = int(content_length)
-                # 너무 작은 파일 (10KB 미만) 제외
-                if file_size < 10240:  # 10KB
+                # 키드짐 특화: 너무 작은 파일 (5KB 미만) 제외 (기존 10KB에서 완화)
+                if file_size < 5120:  # 5KB
                     print(f"[FILTER] 파일 크기 너무 작음 ({file_size} bytes)으로 이미지 제외: {url}")
                     return False
                 # 너무 큰 파일 (10MB 초과) 제외
@@ -665,6 +711,18 @@ class FinalAnalyzer:
             }
             response = requests.get(url, headers=headers, timeout=15, stream=True)
             if response.status_code != 200:
+                # HTTP 403 등의 오류 발생 시 Playwright fallback 시도 (GET 요청)
+                if response.status_code == 403 and page:
+                    print(f"[FALLBACK] HTTP 403 오류 (GET), Playwright로 재시도: {url}")
+                    try:
+                        # Playwright를 통한 이미지 정보 추출
+                        image_info = await self._get_image_info_via_playwright(page, url)
+                        if image_info and image_info.get('width', 0) >= 300:
+                            print(f"[FALLBACK] Playwright로 성공 ({image_info['width']}x{image_info['height']}): {url}")
+                            return True
+                    except Exception as e:
+                        print(f"[FALLBACK] Playwright 실패: {url} - {e}")
+                
                 print(f"[FILTER] 이미지 다운로드 실패로 제외: {url}")
                 return False
             
@@ -683,8 +741,8 @@ class FinalAnalyzer:
                 with Image.open(image_data) as img:
                     width, height = img.size
                     
-                    # 기준서 요구사항: 가로 해상도 660px 이상
-                    if width < 660:
+                    # 키드짐 특화: 가로 해상도 300px 이상 (기존 660px에서 완화)
+                    if width < 300:
                         print(f"[FILTER] 해상도 기준 미달 ({width}x{height})으로 이미지 제외: {url}")
                         return False
                     

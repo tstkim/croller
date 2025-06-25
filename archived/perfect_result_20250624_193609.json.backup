@@ -1,0 +1,38 @@
+{
+  "선택자": {
+    "상품링크": "a[href*=\"/product/detail.html\"]",
+    "상품리스트": ".goods-list li, .item-list li, [class*=\"item\"], li[class*=\"goods\"], .product-list li, .catalog li",
+    "상품명": ".product-name, .goods-name, .item-name, [class*=\"product\"] h1, [class*=\"goods\"] h1, [class*=\"item\"] h1, .name, .title, h2, h1",
+    "가격": "[class*=\"price\"]",
+    "선택옵션": "select:nth-of-type(2), select[name*=\"option\"], .option select",
+    "썸네일": ".thumbnail img",
+    "상세페이지": "#prdDetail img",
+    "상세설명텍스트": ".goods_description p, .product-description p, .detail p, .content p, .description div, .description-content, .product-detail-text"
+  },
+  "추출데이터": [
+    {
+      "url": "https://kidgymb2b.co.kr/product/detail.html?product_no=4988&cate_no=223&display_group=1",
+      "상품명": "스윙호스(6개입)",
+      "가격": "11,000원",
+      "선택옵션": [],
+      "썸네일": "https://kidgymb2b.co.kr/web/product/big/202212/6aa7c80e189e31dc05466f0503433ab8.jpg",
+      "상세페이지": [
+        "https://kidgymb2b.co.kr/web/upload/NNEditor/20250115/1.png"
+      ]
+    },
+    {
+      "url": "https://kidgymb2b.co.kr/product/detail.html?product_no=6696&cate_no=223&display_group=1",
+      "상품명": "컬러유니바 (2개입)",
+      "가격": "60,000원",
+      "선택옵션": [],
+      "썸네일": "https://kidgymb2b.co.kr/web/product/big/202506/78410e9573fb914fb1363104a6770c88.png",
+      "상세페이지": []
+    }
+  ],
+  "SmartDetector정보": {
+    "detected_stage": "4단계: 휴리스틱 DOM 탐색",
+    "detection_log": [],
+    "timestamp": "2025-06-24T19:36:09.498780"
+  },
+  "생성일시": "2025-06-24T19:36:09.498788"
+}

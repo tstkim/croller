@@ -1,0 +1,53 @@
+{
+  "선택자": {
+    "상품링크": "a[href*=\"/product/detail.html\"]",
+    "상품리스트": ".goods-list li, .item-list li, [class*=\"item\"], li[class*=\"goods\"], .product-list li, .catalog li",
+    "상품명": ".product-name, .goods-name, .item-name, [class*=\"product\"] h1, [class*=\"goods\"] h1, [class*=\"item\"] h1, .name, .title, h2, h1",
+    "가격": "[class*=\"price\"]",
+    "선택옵션": "select:nth-of-type(2), select[name*=\"option\"], .option select",
+    "썸네일": ".thumbnail img",
+    "상세페이지": "#prdDetail img",
+    "상세설명텍스트": ".goods_description p, .product-description p, .detail p, .content p, .description div, .description-content, .product-detail-text"
+  },
+  "추출데이터": [
+    {
+      "url": "https://kidgymb2b.co.kr/product/detail.html?product_no=4938&cate_no=223&display_group=1",
+      "상품명": "아쿠아매트",
+      "가격": "345,000원",
+      "선택옵션": [],
+      "썸네일": "https://kidgymb2b.co.kr/web/product/big/201510/2242_shop1_364107.jpg",
+      "상세페이지": [
+        "https://kidgymb2b.co.kr/agent/B2B_information03.png",
+        "http://img.echosting.cafe24.com/skin/base/layout/img_loading.gif"
+      ]
+    },
+    {
+      "url": "https://kidgymb2b.co.kr/product/detail.html?product_no=4374&cate_no=223&display_group=1",
+      "상품명": "소프트하키(스쿠터 별도)",
+      "가격": "195,000원",
+      "선택옵션": [],
+      "썸네일": "https://kidgymb2b.co.kr/web/product/big/201510/2441_shop1_543000.jpg",
+      "상세페이지": [
+        "https://kidgymb2b.co.kr/agent/B2B_information03.png",
+        "http://img.echosting.cafe24.com/skin/base/layout/img_loading.gif"
+      ]
+    },
+    {
+      "url": "https://kidgymb2b.co.kr/product/detail.html?product_no=6605&cate_no=223&display_group=1",
+      "상품명": "DIY줄넘기",
+      "가격": "73,500원",
+      "선택옵션": [],
+      "썸네일": "https://kidgymb2b.co.kr/web/product/big/202410/76fb1b72fd8ce3084da16bdce248ee9f.jpg",
+      "상세페이지": [
+        "https://kidgymb2b.co.kr/web/upload/NNEditor/20250619/copy-1750295448-1000.jpg",
+        "https://kidgymb2b.co.kr/web/upload/NNEditor/20250619/copy-1750295458-ECA484EB8498EAB8B0_EC9584EC9DB4.jpg"
+      ]
+    }
+  ],
+  "SmartDetector정보": {
+    "detected_stage": "4단계: 휴리스틱 DOM 탐색",
+    "detection_log": [],
+    "timestamp": "2025-06-24T19:30:39.807981"
+  },
+  "생성일시": "2025-06-24T19:30:39.807998"
+}
